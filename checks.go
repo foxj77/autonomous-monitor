@@ -153,7 +153,7 @@ func (m *Monitor) checkEvents(ctx context.Context, now time.Time) checkResult {
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "events", "ok").Inc()
 
-	var findings []Finding
+	findings := make([]Finding, 0, len(events.Items))
 	for _, event := range events.Items {
 		if event.Type != corev1.EventTypeWarning {
 			continue
@@ -369,7 +369,7 @@ func (m *Monitor) scanContainerLogs(ctx context.Context, podName, containerName 
 		}
 	}
 
-	var findings []Finding
+	findings := make([]Finding, 0, len(logPatterns))
 	for i, p := range logPatterns {
 		if counts[i].count < p.minCount {
 			continue
@@ -630,7 +630,7 @@ func normalizeReason(reason string) string {
 	if reason == "" {
 		return "unknown"
 	}
-	var out []rune
+	out := make([]rune, 0, len(reason)*2) // worst case: every char becomes a "x-y" pair
 	for i, r := range reason {
 		if r >= 'A' && r <= 'Z' {
 			if i > 0 {
