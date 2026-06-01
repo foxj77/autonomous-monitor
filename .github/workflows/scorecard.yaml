@@ -1,0 +1,41 @@
+name: scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "27 8 * * 3"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+  actions: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results.sarif
+          retention-days: 7

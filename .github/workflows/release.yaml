@@ -1,0 +1,287 @@
+name: release
+
+# Triggered by:
+#   - any push to main (rolling release, tagged with short SHA)
+#   - any tag matching v*.*.* (stable semver release)
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). Leave empty to use the current short SHA."
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  GO_VERSION: "1.23"
+
+jobs:
+  resolve-metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      is_stable: ${{ steps.meta.outputs.is_stable }}
+      tag: ${{ steps.meta.outputs.tag }}
+      ref_name: ${{ steps.meta.outputs.ref_name }}
+      major_minor: ${{ steps.meta.outputs.major_minor }}
+    steps:
+      - id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            tag="${{ inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
+            tag="nightly-${short_sha}"
+          fi
+
+          if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            is_stable="true"
+            major_minor="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          else
+            is_stable="false"
+            major_minor=""
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "is_stable=${is_stable}" >> "$GITHUB_OUTPUT"
+          echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    needs: resolve-metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-amd64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install librdkafka headers
+        run: sudo apt-get update && sudo apt-get install -y librdkafka-dev pkg-config
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: ${{ matrix.target == 'linux-amd64' && 'amd64' || 'arm64' }}
+        run: |
+          mkdir -p dist
+          out="dist/autonomous-monitor-${{ matrix.target }}"
+          go build -tags musl -trimpath -ldflags "-s -w" -o "$out" .
+          chmod +x "$out"
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-${{ matrix.target }}.spdx.json
+          format: spdx-json
+          output-file: dist/sbom-${{ matrix.target }}.spdx.json
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/autonomous-monitor-${{ matrix.target }}
+            dist/sbom-${{ matrix.target }}.spdx.json
+          retention-days: 14
+          if-no-files-found: error
+
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    needs: resolve-metadata
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short,prefix=sha-
+            type=raw,value=${{ needs.resolve-metadata.outputs.tag }}
+            type=match,pattern=v(.*),group=1
+            type=raw,value=latest,enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=container
+          cache-to: type=gha,mode=max,scope=container
+          provenance: true
+          sbom: true
+      - name: Make package public
+        if: needs.resolve-metadata.outputs.is_stable == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE_NAME="${{ github.event.repository.name }}/autonomous-monitor"
+          ENCODED="${PACKAGE_NAME//\//%2F}"
+          gh api --method PATCH "/user/packages/container/${ENCODED}/visibility" -f visibility=public
+
+  cosign-sign:
+    name: cosign sign
+    runs-on: ubuntu-latest
+    needs: [resolve-metadata, container]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+        run: |
+          cosign sign --yes \
+            "${REGISTRY}/${IMAGE_NAME}@$(docker buildx imagetools inspect --raw "${REGISTRY}/${IMAGE_NAME}:${TAG}" | jq -r .manifests[0].digest)" \
+            2>/dev/null \
+            || cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${TAG}"
+
+  publish-oci-artifact:
+    name: OCI artifact (binary)
+    runs-on: ubuntu-latest
+    needs: [resolve-metadata, build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux-amd64
+          path: dist
+      - name: Install oras
+        uses: oras-project/setup-oras@v1
+        with:
+          version: v1.2.0
+      - name: Push OCI artifact
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+        run: |
+          oras push \
+            --artifact-type application/vnd.autonomous-monitor.binary.v1 \
+            "${REGISTRY}/${IMAGE_NAME}:${TAG}" \
+            ./dist/autonomous-monitor-linux-amd64:application/vnd.oci.image.layer.v1.tar+gzip
+      - name: Attach README
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+        run: |
+          oras attach \
+            --artifact-type application/vnd.autonomous-monitor.docs.v1 \
+            "${REGISTRY}/${IMAGE_NAME}:${TAG}" \
+            ./README.md:application/text
+
+  github-release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    needs: [resolve-metadata, build, container, cosign-sign, publish-oci-artifact]
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux-amd64
+          path: dist/amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux-arm64
+          path: dist/arm64
+      - name: Rename binaries
+        run: |
+          mv dist/amd64/autonomous-monitor-linux-amd64 dist/autonomous-monitor-linux-amd64
+          mv dist/arm64/autonomous-monitor-linux-arm64 dist/autonomous-monitor-linux-arm64
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum autonomous-monitor-linux-amd64 autonomous-monitor-linux-arm64 > SHA256SUMS
+      - name: Generate notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+        run: |
+          if [[ "${{ needs.resolve-metadata.outputs.is_stable }}" == "true" ]]; then
+            notes=$(gh release view "$TAG" --json body --jq .body 2>/dev/null || true)
+            if [[ -z "$notes" ]]; then
+              cat > notes.md <<EOF
+          ## autonomous-monitor ${TAG}
+
+          Pull the image:
+          \`\`\`
+          docker pull ghcr.io/${{ github.repository }}:${TAG}
+          \`\`\`
+
+          Pull the raw binary as an OCI artifact (requires \`oras\`):
+          \`\`\`
+          oras pull ghcr.io/${{ github.repository }}:${TAG}
+          \`\`\`
+
+          Verify with cosign:
+          \`\`\`
+          cosign verify ghcr.io/${{ github.repository }}:${TAG} --certificate-identity-regexp '.*' --certificate-oidc-issuer '.*'
+          \`\`\`
+          EOF
+              notes=$(cat notes.md)
+            fi
+          else
+            notes="Pre-built artifacts for commit \`${TAG}\`. For stable releases see the \`v*.*.*\` tags."
+          fi
+          echo "NOTES<<EOF" >> "$GITHUB_ENV"
+          echo "$notes" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-metadata.outputs.tag }}
+          name: ${{ needs.resolve-metadata.outputs.tag }}
+          body: ${{ env.NOTES }}
+          draft: false
+          prerelease: ${{ needs.resolve-metadata.outputs.is_stable != 'true' }}
+          generate_release_notes: true
+          files: |
+            dist/autonomous-monitor-linux-amd64
+            dist/autonomous-monitor-linux-arm64
+            dist/SHA256SUMS

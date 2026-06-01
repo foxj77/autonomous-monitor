@@ -1,0 +1,49 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - misspell
+    - nakedret
+    - nilerr
+    - prealloc
+    - revive
+    - testifylint
+    - thelper
+    - tparallel
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - ifElseChain
+        - rangeValCopy
+        - hugeParam
+        - assignOp
+    revive:
+      rules:
+        - name: package-comments
+          disabled: true
+        - name: var-naming
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+          - unparam
+      - text: "G404:"
+        linters:
+          - gosec

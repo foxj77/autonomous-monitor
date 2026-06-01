@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autonomous-monitor
+  namespace: default
+  labels:
+    app.kubernetes.io/name: autonomous-monitor
+    app.kubernetes.io/component: monitor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autonomous-monitor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autonomous-monitor
+    spec:
+      serviceAccountName: autonomous-monitor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: autonomous-monitor
+          image: ghcr.io/foxj77/autonomous-monitor:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDPANDA_BROKER
+              value: localhost:9092
+            - name: FINDINGS_TOPIC
+              value: k8s.namespace.findings
+            - name: STATE_CONFIGMAP_NAME
+              value: autonomous-monitor-state
+            - name: AI_TRIAGE_ENABLED
+              value: "true"
+            - name: AI_MIN_SCORE
+              value: "60"
+            - name: POLL_INTERVAL
+              value: 60s
+            - name: LOG_SCAN_LINES
+              value: "100"
+            - name: RESOURCE_USAGE_BACKEND
+              value: metrics-server
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autonomous-monitor
+  namespace: default
+  labels:
+    app.kubernetes.io/name: autonomous-monitor
+spec:
+  selector:
+    app.kubernetes.io/name: autonomous-monitor
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP

@@ -1,0 +1,54 @@
+package main
+
+import (
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	checksTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_checks_total",
+		Help: "Checks run by family and result.",
+	}, []string{"namespace", "check", "result"})
+	findingsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_findings_total",
+		Help: "Findings created by classification and check.",
+	}, []string{"namespace", "classification", "check"})
+	activeFindings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "autonomous_monitor_active_findings",
+		Help: "Current active finding count by classification.",
+	}, []string{"namespace", "classification"})
+	aiDispatchRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_ai_dispatch_requests_total",
+		Help: "Findings marked for AI dispatch.",
+	}, []string{"namespace", "result"})
+	aiCooldowns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_ai_cooldowns_total",
+		Help: "AI dispatch requests suppressed by cooldown.",
+	}, []string{"namespace"})
+	stateWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_state_writes_total",
+		Help: "ConfigMap state writes by result.",
+	}, []string{"namespace", "result"})
+	resourceSamples = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_resource_samples_total",
+		Help: "Resource samples collected by backend.",
+	}, []string{"namespace", "backend"})
+	pollDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "autonomous_monitor_poll_duration_seconds",
+		Help:    "Poll duration in seconds.",
+		Buckets: prometheus.ExponentialBuckets(0.05, 2, 10),
+	}, []string{"namespace"})
+)
+
+func init() {
+	prometheus.MustRegister(
+		checksTotal,
+		findingsTotal,
+		activeFindings,
+		aiDispatchRequests,
+		aiCooldowns,
+		stateWrites,
+		resourceSamples,
+		pollDuration,
+	)
+}

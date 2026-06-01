@@ -1,0 +1,15 @@
+# Build artifacts
+/autonomous-monitor
+/autonomous-monitor-*
+/coverage.out
+/dist/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Go
+*.test
+*.out
