@@ -307,7 +307,7 @@ jobs:
           echo "$notes" >> "$GITHUB_ENV"
           echo "EOF" >> "$GITHUB_ENV"
       - name: Create or update release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.resolve-metadata.outputs.tag }}
           name: ${{ needs.resolve-metadata.outputs.tag }}
