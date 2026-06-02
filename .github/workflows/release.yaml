@@ -115,7 +115,7 @@ jobs:
           cd dist
           sha256sum amd64/autonomous-monitor-linux-amd64 arm64/autonomous-monitor-linux-arm64 > SHA256SUMS
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-binaries
           path: |
