@@ -198,8 +198,16 @@ jobs:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           TAG: ${{ needs.resolve-metadata.outputs.tag }}
         run: |
-          digest=$(docker buildx imagetools inspect --raw "${REGISTRY}/${IMAGE_NAME}:${TAG}" | jq -r '.manifests[0].digest // .digest')
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${digest}"
+          # For multi-arch images, the manifest list is what cosign signs.
+          # The index digest is exposed in the Docker-Content-Digest header
+          # by buildx imagetools inspect.
+          digest=$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${TAG}" 2>/dev/null | awk -F': ' '/^Digest:/ {print $2}' | head -1 | tr -d ' ')
+          if [[ -z "$digest" ]]; then
+            echo "Failed to extract digest; falling back to tag-based sign"
+            cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          else
+            cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${digest}"
+          fi
 
   publish-oci-artifact:
     name: OCI artifact (binary)
