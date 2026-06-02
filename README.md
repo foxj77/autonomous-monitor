@@ -242,9 +242,9 @@ This repo uses GitHub Actions to publish:
 - The same image signed with `cosign` (keyless, OIDC)
 - A SBOM in SPDX JSON
 - A GitHub Release with the raw binaries (linux/amd64, linux/arm64) attached
-- The raw binary as an OCI artifact (using `oras`) at `ghcr.io/foxj77/autonomous-monitor:<tag>`
+- The raw binaries as an OCI artifact (using `oras`) at `ghcr.io/foxj77/autonomous-monitor:<tag>-binary`
 
-Every push to `main` produces a `:nightly` and `:main` image. Every tag matching `v*.*.*` produces a stable release.
+Every push to `main` produces `:main`, `:sha-<short>`, and `:nightly-<short>` image tags. Every tag matching `v*.*.*` produces a stable release.
 
 ## License
 

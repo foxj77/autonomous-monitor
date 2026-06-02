@@ -31,6 +31,7 @@ jobs:
     outputs:
       is_stable: ${{ steps.meta.outputs.is_stable }}
       tag: ${{ steps.meta.outputs.tag }}
+      binary_tag: ${{ steps.meta.outputs.binary_tag }}
       ref_name: ${{ steps.meta.outputs.ref_name }}
       major_minor: ${{ steps.meta.outputs.major_minor }}
     steps:
@@ -56,6 +57,7 @@ jobs:
           fi
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "binary_tag=${tag}-binary" >> "$GITHUB_OUTPUT"
           echo "is_stable=${is_stable}" >> "$GITHUB_OUTPUT"
           echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
           echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
@@ -238,21 +240,23 @@ jobs:
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+          BINARY_TAG: ${{ needs.resolve-metadata.outputs.binary_tag }}
         run: |
           oras push \
             --artifact-type application/vnd.autonomous-monitor.binary.v1 \
-            "${REGISTRY}/${IMAGE_NAME}:${TAG}" \
-            ./dist/amd64/autonomous-monitor-linux-amd64:application/vnd.oci.image.layer.v1.tar+gzip
+            "${REGISTRY}/${IMAGE_NAME}:${BINARY_TAG}" \
+            ./dist/amd64/autonomous-monitor-linux-amd64:application/octet-stream \
+            ./dist/arm64/autonomous-monitor-linux-arm64:application/octet-stream \
+            ./dist/SHA256SUMS:text/plain
       - name: Attach README
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+          BINARY_TAG: ${{ needs.resolve-metadata.outputs.binary_tag }}
         run: |
           oras attach \
             --artifact-type application/vnd.autonomous-monitor.docs.v1 \
-            "${REGISTRY}/${IMAGE_NAME}:${TAG}" \
+            "${REGISTRY}/${IMAGE_NAME}:${BINARY_TAG}" \
             ./README.md:application/text
 
   github-release:
@@ -271,6 +275,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-metadata.outputs.tag }}
+          BINARY_TAG: ${{ needs.resolve-metadata.outputs.binary_tag }}
         run: |
           if [[ "${{ needs.resolve-metadata.outputs.is_stable }}" == "true" ]]; then
             notes=$(gh release view "$TAG" --json body --jq .body 2>/dev/null || true)
@@ -283,9 +288,9 @@ jobs:
           docker pull ghcr.io/${{ github.repository }}:${TAG}
           \`\`\`
 
-          Pull the raw binary as an OCI artifact (requires \`oras\`):
+          Pull the raw binaries as an OCI artifact (requires \`oras\`):
           \`\`\`
-          oras pull ghcr.io/${{ github.repository }}:${TAG}
+          oras pull ghcr.io/${{ github.repository }}:${BINARY_TAG}
           \`\`\`
 
           Verify with cosign:
