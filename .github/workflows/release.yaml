@@ -60,47 +60,68 @@ jobs:
           echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
           echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build ${{ matrix.target }}
+  binaries:
+    name: Build binaries
     runs-on: ubuntu-latest
     needs: resolve-metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [linux-amd64, linux-arm64]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Install librdkafka headers
-        run: sudo apt-get update && sudo apt-get install -y librdkafka-dev pkg-config
-      - name: Build
-        env:
-          CGO_ENABLED: "1"
-          GOOS: linux
-          GOARCH: ${{ matrix.target == 'linux-amd64' && 'amd64' || 'arm64' }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build binaries (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          tags: autonomous-monitor:extract-amd64
+          outputs: type=local,dest=dist/amd64
+      - name: Build binaries (linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/arm64
+          tags: autonomous-monitor:extract-arm64
+          outputs: type=local,dest=dist/arm64
+      - name: Rename binaries
         run: |
-          mkdir -p dist
-          out="dist/autonomous-monitor-${{ matrix.target }}"
-          go build -tags musl -trimpath -ldflags "-s -w" -o "$out" .
-          chmod +x "$out"
-      - name: Generate SBOM
+          mv dist/amd64/autonomous-monitor dist/amd64/autonomous-monitor-linux-amd64 || true
+          mv dist/arm64/autonomous-monitor dist/arm64/autonomous-monitor-linux-arm64 || true
+          ls -la dist/amd64 dist/arm64
+      - name: Generate SBOM (linux/amd64)
         uses: anchore/sbom-action@v0
         with:
-          artifact-name: sbom-${{ matrix.target }}.spdx.json
+          artifact-name: sbom-linux-amd64.spdx.json
           format: spdx-json
-          output-file: dist/sbom-${{ matrix.target }}.spdx.json
+          output-file: dist/sbom-linux-amd64.spdx.json
+      - name: Generate SBOM (linux/arm64)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: sbom-linux-arm64.spdx.json
+          format: spdx-json
+          output-file: dist/sbom-linux-arm64.spdx.json
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum amd64/autonomous-monitor-linux-amd64 arm64/autonomous-monitor-linux-arm64 > SHA256SUMS
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.target }}
+          name: release-binaries
           path: |
-            dist/autonomous-monitor-${{ matrix.target }}
-            dist/sbom-${{ matrix.target }}.spdx.json
+            dist/amd64/autonomous-monitor-linux-amd64
+            dist/arm64/autonomous-monitor-linux-arm64
+            dist/sbom-linux-amd64.spdx.json
+            dist/sbom-linux-arm64.spdx.json
+            dist/SHA256SUMS
           retention-days: 14
           if-no-files-found: error
 
@@ -164,6 +185,11 @@ jobs:
       packages: write
       id-token: write
     steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
       - name: Sign
@@ -172,23 +198,26 @@ jobs:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           TAG: ${{ needs.resolve-metadata.outputs.tag }}
         run: |
-          cosign sign --yes \
-            "${REGISTRY}/${IMAGE_NAME}@$(docker buildx imagetools inspect --raw "${REGISTRY}/${IMAGE_NAME}:${TAG}" | jq -r .manifests[0].digest)" \
-            2>/dev/null \
-            || cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          digest=$(docker buildx imagetools inspect --raw "${REGISTRY}/${IMAGE_NAME}:${TAG}" | jq -r '.manifests[0].digest // .digest')
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${digest}"
 
   publish-oci-artifact:
     name: OCI artifact (binary)
     runs-on: ubuntu-latest
-    needs: [resolve-metadata, build]
+    needs: [resolve-metadata, binaries]
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-linux-amd64
+          name: release-binaries
           path: dist
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install oras
         uses: oras-project/setup-oras@v1
         with:
@@ -202,7 +231,7 @@ jobs:
           oras push \
             --artifact-type application/vnd.autonomous-monitor.binary.v1 \
             "${REGISTRY}/${IMAGE_NAME}:${TAG}" \
-            ./dist/autonomous-monitor-linux-amd64:application/vnd.oci.image.layer.v1.tar+gzip
+            ./dist/amd64/autonomous-monitor-linux-amd64:application/vnd.oci.image.layer.v1.tar+gzip
       - name: Attach README
         env:
           REGISTRY: ${{ env.REGISTRY }}
@@ -217,27 +246,15 @@ jobs:
   github-release:
     name: GitHub release
     runs-on: ubuntu-latest
-    needs: [resolve-metadata, build, container, cosign-sign, publish-oci-artifact]
+    needs: [resolve-metadata, binaries, container, cosign-sign, publish-oci-artifact]
     permissions:
       contents: write
       packages: read
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-linux-amd64
-          path: dist/amd64
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-linux-arm64
-          path: dist/arm64
-      - name: Rename binaries
-        run: |
-          mv dist/amd64/autonomous-monitor-linux-amd64 dist/autonomous-monitor-linux-amd64
-          mv dist/arm64/autonomous-monitor-linux-arm64 dist/autonomous-monitor-linux-arm64
-      - name: Checksums
-        run: |
-          cd dist
-          sha256sum autonomous-monitor-linux-amd64 autonomous-monitor-linux-arm64 > SHA256SUMS
+          name: release-binaries
+          path: dist
       - name: Generate notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -282,6 +299,8 @@ jobs:
           prerelease: ${{ needs.resolve-metadata.outputs.is_stable != 'true' }}
           generate_release_notes: true
           files: |
-            dist/autonomous-monitor-linux-amd64
-            dist/autonomous-monitor-linux-arm64
+            dist/amd64/autonomous-monitor-linux-amd64
+            dist/arm64/autonomous-monitor-linux-arm64
+            dist/sbom-linux-amd64.spdx.json
+            dist/sbom-linux-arm64.spdx.json
             dist/SHA256SUMS
