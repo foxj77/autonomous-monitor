@@ -61,7 +61,7 @@ func main() {
 		dynClient = dc
 	}
 
-	publisher, err := NewKafkaPublisher(cfg.RedpandaBroker, cfg.FindingsTopic)
+	publisher, err := NewKafkaPublisher(cfg.RedpandaBroker, cfg.FindingsTopic, cfg.PublishTimeout)
 	if err != nil {
 		log.Fatalf("failed to create Redpanda publisher: %v", err)
 	}

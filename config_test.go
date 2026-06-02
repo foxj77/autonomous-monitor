@@ -50,6 +50,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.RedpandaBroker != "localhost:9092" {
 		t.Fatalf("redpanda broker = %q, want generic localhost:9092 default", cfg.RedpandaBroker)
 	}
+	if cfg.PublishTimeout != 10*time.Second {
+		t.Fatalf("publish timeout = %s, want 10s", cfg.PublishTimeout)
+	}
 }
 
 func TestResourceBackendDisabledDisablesUsageCheck(t *testing.T) {
@@ -74,6 +77,7 @@ func clearConfigEnv(t *testing.T) {
 		"RESOURCE_USAGE_BACKEND",
 		"REDPANDA_BROKER",
 		"FINDINGS_TOPIC",
+		"PUBLISH_TIMEOUT",
 		"STATE_CONFIGMAP_NAME",
 		"RESOLVED_FINDING_RETENTION",
 		"AI_TRIAGE_ENABLED",

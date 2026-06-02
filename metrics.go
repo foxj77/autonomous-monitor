@@ -29,6 +29,10 @@ var (
 		Name: "autonomous_monitor_state_writes_total",
 		Help: "ConfigMap state writes by result.",
 	}, []string{"namespace", "result"})
+	publishAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_publish_attempts_total",
+		Help: "Finding publish attempts by result.",
+	}, []string{"namespace", "result"})
 	resourceSamples = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "autonomous_monitor_resource_samples_total",
 		Help: "Resource samples collected by backend.",
@@ -48,6 +52,7 @@ func init() {
 		aiDispatchRequests,
 		aiCooldowns,
 		stateWrites,
+		publishAttempts,
 		resourceSamples,
 		pollDuration,
 	)

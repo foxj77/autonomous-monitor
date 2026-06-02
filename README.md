@@ -145,6 +145,7 @@ All configuration is environment-driven.
 | `METRICS_PORT` | `8080` | Prometheus endpoint port |
 | `REDPANDA_BROKER` | `localhost:9092` | Kafka-compatible broker |
 | `FINDINGS_TOPIC` | `k8s.namespace.findings` | Topic for JSON findings |
+| `PUBLISH_TIMEOUT` | `10s` | How long to wait for broker delivery confirmation before retrying later |
 | `STATE_CONFIGMAP_NAME` | `autonomous-monitor-state` | Per-namespace state CM |
 | `STATE_WRITE_INTERVAL` | `60s` | Throttle for state CM writes |
 | `RESOLVED_FINDING_RETENTION` | `24h` | Drop resolved findings from state after this |
@@ -212,6 +213,7 @@ Resolution events (status: `resolved`) are emitted when a previously-ongoing fin
 `autonomous_monitor_ai_dispatch_requests_total{namespace,result}`
 `autonomous_monitor_ai_cooldowns_total{namespace}`
 `autonomous_monitor_state_writes_total{namespace,result}`
+`autonomous_monitor_publish_attempts_total{namespace,result}`
 `autonomous_monitor_resource_samples_total{namespace,backend}`
 `autonomous_monitor_poll_duration_seconds{namespace}`
 

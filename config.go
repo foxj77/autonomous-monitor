@@ -26,6 +26,7 @@ type Config struct {
 	MetricsPort              string
 	RedpandaBroker           string
 	FindingsTopic            string
+	PublishTimeout           time.Duration
 	StateConfigMapName       string
 	StateWriteInterval       time.Duration
 	ResolvedFindingRetention time.Duration
@@ -58,6 +59,7 @@ func LoadConfig() Config {
 		MetricsPort:              env("METRICS_PORT", "8080"),
 		RedpandaBroker:           env("REDPANDA_BROKER", "localhost:9092"),
 		FindingsTopic:            env("FINDINGS_TOPIC", "k8s.namespace.findings"),
+		PublishTimeout:           durationEnv("PUBLISH_TIMEOUT", 10*time.Second),
 		StateConfigMapName:       env("STATE_CONFIGMAP_NAME", "autonomous-monitor-state"),
 		StateWriteInterval:       durationEnv("STATE_WRITE_INTERVAL", 60*time.Second),
 		ResolvedFindingRetention: durationEnv("RESOLVED_FINDING_RETENTION", 24*time.Hour),
