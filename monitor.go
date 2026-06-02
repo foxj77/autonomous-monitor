@@ -48,37 +48,37 @@ func (m *Monitor) Poll(ctx context.Context) {
 	if m.cfg.Checks.Pods {
 		result := m.checkPods(ctx, now)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.ResourceSpecs {
 		result := m.checkResourceSpecs(ctx)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Events {
 		result := m.checkEvents(ctx, now)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Workloads {
 		result := m.checkWorkloads(ctx)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Logs {
 		result := m.checkLogs(ctx)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.ResourceUsage {
 		result := m.checkResourceUsage(ctx, now)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.CustomResource {
 		result := m.checkCustomResources(ctx)
 		complete = complete && result.complete
-		m.collectFindings(result.findings, now, active)
+		m.collectFindings(ctx, result.findings, now, active)
 	}
 
 	if complete {
@@ -91,7 +91,7 @@ func (m *Monitor) Poll(ctx context.Context) {
 	pollDuration.WithLabelValues(m.cfg.Namespace).Observe(time.Since(start).Seconds())
 }
 
-func (m *Monitor) collectFindings(findings []Finding, now time.Time, active map[string]Finding) {
+func (m *Monitor) collectFindings(ctx context.Context, findings []Finding, now time.Time, active map[string]Finding) {
 	for _, finding := range findings {
 		if m.isSuppressed(finding) {
 			log.Printf("suppressed finding kind=%s name=%s reason=%s", finding.Kind, finding.Name, finding.Reason)
@@ -118,7 +118,14 @@ func (m *Monitor) collectFindings(findings []Finding, now time.Time, active map[
 		}
 
 		finding.FirstSeen = state.FirstSeen
-		shouldPublish := !exists || state.Status == "resolved" || finding.Score > state.Score || finding.Classification != state.Classification
+		shouldPublish := !exists ||
+			state.Status == "resolved" ||
+			state.LastPublished == nil ||
+			state.LastPublishFailed != nil ||
+			finding.Score > state.Score ||
+			finding.Classification != state.Classification
+		var aiDispatchRequested bool
+		var nextCooldownUntil *time.Time
 
 		if m.cfg.AITriageEnabled && finding.Score >= m.cfg.AIMinScore {
 			if state.CooldownUntil == nil || now.After(*state.CooldownUntil) {
@@ -127,11 +134,10 @@ func (m *Monitor) collectFindings(findings []Finding, now time.Time, active map[
 					cooldown = m.cfg.AICooldownIncident
 				}
 				cooldownUntil := now.Add(cooldown)
-				state.LastAIDispatchRequested = &now
-				state.CooldownUntil = &cooldownUntil
+				nextCooldownUntil = &cooldownUntil
 				finding.AITriageRequired = true
 				finding.CooldownUntil = &cooldownUntil
-				aiDispatchRequests.WithLabelValues(m.cfg.Namespace, "requested").Inc()
+				aiDispatchRequested = true
 				shouldPublish = true
 			} else {
 				finding.CooldownUntil = state.CooldownUntil
@@ -150,8 +156,19 @@ func (m *Monitor) collectFindings(findings []Finding, now time.Time, active map[
 		m.dirty = true
 
 		if shouldPublish {
-			m.publish(context.Background(), finding)
+			if err := m.publish(ctx, finding); err != nil {
+				state.LastPublishFailed = &now
+				m.dirty = true
+				active[finding.ID] = finding
+				continue
+			}
 			state.LastPublished = &now
+			state.LastPublishFailed = nil
+			if aiDispatchRequested {
+				state.LastAIDispatchRequested = &now
+				state.CooldownUntil = nextCooldownUntil
+				aiDispatchRequests.WithLabelValues(m.cfg.Namespace, "requested").Inc()
+			}
 			m.dirty = true
 		}
 		active[finding.ID] = finding
@@ -183,12 +200,17 @@ func (m *Monitor) resolveMissingFindings(ctx context.Context, now time.Time, act
 			LastSeen:       now,
 			Evidence:       []string{"deterministic check no longer reports this finding"},
 		}
-		m.publish(ctx, resolved)
+		if err := m.publish(ctx, resolved); err != nil {
+			state.LastPublishFailed = &now
+			m.dirty = true
+			continue
+		}
 		state.Status = "resolved"
 		state.LastSeen = now
 		state.Score = 0
 		state.Classification = "healthy"
 		state.LastPublished = &now
+		state.LastPublishFailed = nil
 		m.dirty = true
 	}
 }
@@ -209,14 +231,17 @@ func (m *Monitor) expireResolvedFindings(now time.Time) {
 	}
 }
 
-func (m *Monitor) publish(ctx context.Context, finding Finding) {
+func (m *Monitor) publish(ctx context.Context, finding Finding) error {
 	if err := m.publisher.PublishFinding(ctx, finding); err != nil {
+		publishAttempts.WithLabelValues(m.cfg.Namespace, "error").Inc()
 		log.Printf("ERROR: failed to publish finding %s: %v", finding.ID, err)
-		return
+		return err
 	}
+	publishAttempts.WithLabelValues(m.cfg.Namespace, "ok").Inc()
 	findingsTotal.WithLabelValues(m.cfg.Namespace, finding.Classification, finding.Check).Inc()
 	log.Printf("published finding id=%s namespace=%s kind=%s name=%s check=%s classification=%s score=%d ai_triage_required=%t",
 		finding.ID, finding.Namespace, finding.Kind, finding.Name, finding.Check, finding.Classification, finding.Score, finding.AITriageRequired)
+	return nil
 }
 
 func (m *Monitor) maybeSave(ctx context.Context, now time.Time) {

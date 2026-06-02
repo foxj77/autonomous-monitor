@@ -30,6 +30,7 @@ type FindingState struct {
 	FirstSeen               time.Time  `json:"first_seen"`
 	LastSeen                time.Time  `json:"last_seen"`
 	LastPublished           *time.Time `json:"last_published,omitempty"`
+	LastPublishFailed       *time.Time `json:"last_publish_failed,omitempty"`
 	LastAIDispatchRequested *time.Time `json:"last_ai_dispatch_requested,omitempty"`
 	CooldownUntil           *time.Time `json:"cooldown_until,omitempty"`
 	Score                   int        `json:"score"`
@@ -40,7 +41,7 @@ type FindingState struct {
 type Observation struct {
 	RestartCount       int32     `json:"restart_count,omitempty"`
 	LastSeen           time.Time `json:"last_seen"`
-	MemorySamplesPct   []int64   `json:"memory_samples_pct,omitempty"`  // last N memory-usage-as-%-of-limit readings
+	MemorySamplesPct   []int64   `json:"memory_samples_pct,omitempty"` // last N memory-usage-as-%-of-limit readings
 	LastResourceSample time.Time `json:"last_resource_sample,omitempty"`
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,11 +14,12 @@ import (
 
 type recordingPublisher struct {
 	findings []Finding
+	err      error
 }
 
 func (p *recordingPublisher) PublishFinding(_ context.Context, finding Finding) error {
 	p.findings = append(p.findings, finding)
-	return nil
+	return p.err
 }
 
 func (p *recordingPublisher) Close() {}
@@ -50,6 +52,52 @@ func TestMonitorPublishesNotReadyFindingWithAIDispatchAndCooldown(t *testing.T) 
 	}
 }
 
+func TestMonitorRetriesFailedFindingPublish(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(notReadyPod("cert-manager", "cert-manager-webhook"))
+	store := NewStateStore(client, "cert-manager", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	publisher := &recordingPublisher{err: errors.New("broker down")}
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+
+	monitor.Poll(ctx)
+	if len(publisher.findings) != 1 {
+		t.Fatalf("publish attempts after first poll = %d, want 1", len(publisher.findings))
+	}
+	failedState := monitor.state.Findings[publisher.findings[0].ID]
+	if failedState.LastPublished != nil {
+		t.Fatal("failed publish should not set LastPublished")
+	}
+	if failedState.LastPublishFailed == nil {
+		t.Fatal("failed publish should record LastPublishFailed")
+	}
+	if failedState.CooldownUntil != nil {
+		t.Fatal("failed AI dispatch publish should not start cooldown")
+	}
+
+	publisher.err = nil
+	monitor.Poll(ctx)
+	if len(publisher.findings) != 2 {
+		t.Fatalf("publish attempts after retry = %d, want 2", len(publisher.findings))
+	}
+	retriedState := monitor.state.Findings[publisher.findings[1].ID]
+	if retriedState.LastPublished == nil {
+		t.Fatal("successful retry should set LastPublished")
+	}
+	if retriedState.LastPublishFailed != nil {
+		t.Fatal("successful retry should clear LastPublishFailed")
+	}
+	if retriedState.CooldownUntil == nil {
+		t.Fatal("successful retry should start AI cooldown")
+	}
+	if !publisher.findings[1].AITriageRequired {
+		t.Fatal("successful retry should still request AI triage")
+	}
+}
+
 func TestMonitorPublishesResolvedFinding(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset(notReadyPod("cert-manager", "cert-manager-webhook"))
@@ -72,6 +120,52 @@ func TestMonitorPublishesResolvedFinding(t *testing.T) {
 	}
 	if publisher.findings[1].Status != "resolved" {
 		t.Fatalf("second finding status = %q, want resolved", publisher.findings[1].Status)
+	}
+}
+
+func TestMonitorRetriesFailedResolvedPublish(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(notReadyPod("cert-manager", "cert-manager-webhook"))
+	store := NewStateStore(client, "cert-manager", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	publisher := &recordingPublisher{}
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+
+	monitor.Poll(ctx)
+	if err := client.CoreV1().Pods("cert-manager").Delete(ctx, "cert-manager-webhook", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("Delete pod: %v", err)
+	}
+
+	publisher.err = errors.New("broker down")
+	monitor.Poll(ctx)
+	if len(publisher.findings) != 2 {
+		t.Fatalf("publish attempts after failed resolution = %d, want 2", len(publisher.findings))
+	}
+	stateAfterFailure := monitor.state.Findings[publisher.findings[0].ID]
+	if stateAfterFailure.Status != "ongoing" {
+		t.Fatalf("failed resolved publish should keep status ongoing, got %q", stateAfterFailure.Status)
+	}
+	if stateAfterFailure.LastPublishFailed == nil {
+		t.Fatal("failed resolved publish should record LastPublishFailed")
+	}
+
+	publisher.err = nil
+	monitor.Poll(ctx)
+	if len(publisher.findings) != 3 {
+		t.Fatalf("publish attempts after resolved retry = %d, want 3", len(publisher.findings))
+	}
+	stateAfterRetry := monitor.state.Findings[publisher.findings[0].ID]
+	if stateAfterRetry.Status != "resolved" {
+		t.Fatalf("successful resolved retry should mark resolved, got %q", stateAfterRetry.Status)
+	}
+	if stateAfterRetry.LastPublishFailed != nil {
+		t.Fatal("successful resolved retry should clear LastPublishFailed")
+	}
+	if publisher.findings[2].Status != "resolved" {
+		t.Fatalf("third publish status = %q, want resolved", publisher.findings[2].Status)
 	}
 }
 
