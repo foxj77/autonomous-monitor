@@ -9,7 +9,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -tags musl -o /autonomous-monitor .
 
-FROM alpine:3.20
+FROM alpine:3.23
 RUN apk add --no-cache librdkafka ca-certificates
 COPY --from=builder /autonomous-monitor /autonomous-monitor
 
