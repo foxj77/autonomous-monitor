@@ -58,14 +58,15 @@ jobs:
           path: coverage.out
           retention-days: 7
 
+  # Native host-arch build smoke test. Multi-arch (linux/amd64 + linux/arm64)
+  # container images and binaries are produced by the release workflow using
+  # Docker buildx + QEMU, which handles the CGO cross-compile correctly. A
+  # raw go-cross-compile on an amd64 runner cannot build the arm64 C runtime
+  # for confluent-kafka-go, so we do not attempt it here.
   build:
-    name: Build (${{ matrix.target }})
+    name: Build
     runs-on: ubuntu-latest
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [linux-amd64, linux-arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -77,18 +78,15 @@ jobs:
       - name: Build
         env:
           CGO_ENABLED: "1"
-          GOOS: ${{ matrix.target == 'linux-amd64' && 'linux' || 'linux' }}
-          GOARCH: ${{ matrix.target == 'linux-amd64' && 'amd64' || 'arm64' }}
         run: |
           mkdir -p dist
-          out="dist/autonomous-monitor-${{ matrix.target }}"
-          go build -tags musl -trimpath -ldflags "-s -w" -o "$out" .
-          chmod +x "$out"
-          "$out" --help 2>&1 | head -5 || true
+          go build -tags musl -trimpath -ldflags "-s -w" -o "dist/autonomous-monitor" .
+          chmod +x "dist/autonomous-monitor"
+          "dist/autonomous-monitor" 2>&1 | head -3 || true
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: binary-${{ matrix.target }}
-          path: dist/autonomous-monitor-${{ matrix.target }}
-          retention-days: 14
+          name: binary
+          path: dist/autonomous-monitor
+          retention-days: 7
           if-no-files-found: error
