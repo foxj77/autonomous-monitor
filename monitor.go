@@ -46,52 +46,58 @@ func (m *Monitor) Poll(ctx context.Context) {
 	complete := true
 
 	if m.cfg.Checks.Pods {
-		result := m.checkPods(ctx, now)
+		result := m.runCheck(ctx, "pods", func(checkCtx context.Context) checkResult {
+			return m.checkPods(checkCtx, now)
+		})
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.ResourceSpecs {
-		result := m.checkResourceSpecs(ctx)
+		result := m.runCheck(ctx, "resource-spec", m.checkResourceSpecs)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Events {
-		result := m.checkEvents(ctx, now)
+		result := m.runCheck(ctx, "events", func(checkCtx context.Context) checkResult {
+			return m.checkEvents(checkCtx, now)
+		})
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Workloads {
-		result := m.checkWorkloads(ctx)
+		result := m.runCheck(ctx, "workloads", m.checkWorkloads)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Services {
-		result := m.checkServices(ctx)
+		result := m.runCheck(ctx, "services", m.checkServices)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.PVCs {
-		result := m.checkPVCs(ctx)
+		result := m.runCheck(ctx, "pvcs", m.checkPVCs)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Scaling {
-		result := m.checkScaling(ctx)
+		result := m.runCheck(ctx, "scaling", m.checkScaling)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.Logs {
-		result := m.checkLogs(ctx)
+		result := m.runCheck(ctx, "logs", m.checkLogs)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.ResourceUsage {
-		result := m.checkResourceUsage(ctx, now)
+		result := m.runCheck(ctx, "resource-usage", func(checkCtx context.Context) checkResult {
+			return m.checkResourceUsage(checkCtx, now)
+		})
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
 	if m.cfg.Checks.CustomResource {
-		result := m.checkCustomResources(ctx)
+		result := m.runCheck(ctx, "custom-resources", m.checkCustomResources)
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
@@ -104,6 +110,38 @@ func (m *Monitor) Poll(ctx context.Context) {
 	m.updateActiveMetrics(active)
 	m.maybeSave(ctx, now)
 	pollDuration.WithLabelValues(m.cfg.Namespace).Observe(time.Since(start).Seconds())
+}
+
+func (m *Monitor) runCheck(ctx context.Context, name string, fn func(context.Context) checkResult) checkResult {
+	if m.cfg.CheckTimeout <= 0 {
+		return fn(ctx)
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, m.cfg.CheckTimeout)
+	defer cancel()
+
+	done := make(chan checkResult, 1)
+	go func() {
+		done <- fn(checkCtx)
+	}()
+
+	select {
+	case result := <-done:
+		if !result.complete && checkCtx.Err() == context.DeadlineExceeded {
+			m.recordCheckTimeout(name)
+		}
+		return result
+	case <-checkCtx.Done():
+		if checkCtx.Err() == context.DeadlineExceeded {
+			m.recordCheckTimeout(name)
+		}
+		return checkResult{complete: false}
+	}
+}
+
+func (m *Monitor) recordCheckTimeout(name string) {
+	checksTotal.WithLabelValues(m.cfg.Namespace, name, "timeout").Inc()
+	log.Printf("ERROR: check timed out namespace=%s check=%s timeout=%s", m.cfg.Namespace, name, m.cfg.CheckTimeout)
 }
 
 func (m *Monitor) collectFindings(ctx context.Context, findings []Finding, now time.Time, active map[string]Finding) {

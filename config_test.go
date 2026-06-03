@@ -53,6 +53,20 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.PublishTimeout != 10*time.Second {
 		t.Fatalf("publish timeout = %s, want 10s", cfg.PublishTimeout)
 	}
+	if cfg.CheckTimeout != 30*time.Second {
+		t.Fatalf("check timeout = %s, want 30s", cfg.CheckTimeout)
+	}
+}
+
+func TestLoadConfigCheckTimeout(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CHECK_TIMEOUT", "250ms")
+
+	cfg := LoadConfig()
+
+	if cfg.CheckTimeout != 250*time.Millisecond {
+		t.Fatalf("check timeout = %s, want 250ms", cfg.CheckTimeout)
+	}
 }
 
 func TestResourceBackendDisabledDisablesUsageCheck(t *testing.T) {
@@ -78,6 +92,7 @@ func clearConfigEnv(t *testing.T) {
 		"REDPANDA_BROKER",
 		"FINDINGS_TOPIC",
 		"PUBLISH_TIMEOUT",
+		"CHECK_TIMEOUT",
 		"STATE_CONFIGMAP_NAME",
 		"RESOLVED_FINDING_RETENTION",
 		"AI_TRIAGE_ENABLED",

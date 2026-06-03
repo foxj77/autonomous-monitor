@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 type recordingPublisher struct {
@@ -281,6 +282,50 @@ func TestConfiguredChecksAreWiredIntoPoll(t *testing.T) {
 	}
 }
 
+func TestPollTimesOutSlowCheck(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	checkStarted := make(chan struct{})
+	checkDone := make(chan struct{})
+	client.Fake.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		close(checkStarted)
+		time.Sleep(200 * time.Millisecond)
+		close(checkDone)
+		return true, &corev1.PodList{}, nil
+	})
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	cfg := testConfig("ns1")
+	cfg.Checks = CheckConfig{Pods: true}
+	cfg.CheckTimeout = 10 * time.Millisecond
+	publisher := &recordingPublisher{}
+	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+
+	start := time.Now()
+	monitor.Poll(ctx)
+	elapsed := time.Since(start)
+
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("Poll elapsed = %s, want bounded by check timeout", elapsed)
+	}
+	select {
+	case <-checkStarted:
+	default:
+		t.Fatal("expected pod check to start")
+	}
+	if len(publisher.findings) != 0 {
+		t.Fatalf("timeout check should not publish findings, got %+v", publisher.findings)
+	}
+	select {
+	case <-checkDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stalled check goroutine to exit")
+	}
+}
+
 func TestMonitorExpiresOldResolvedFindings(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
@@ -327,6 +372,7 @@ func testConfig(namespace string) Config {
 		RestartWarningCount:      3,
 		RestartWindow:            10 * time.Minute,
 		EventLookback:            30 * time.Minute,
+		CheckTimeout:             30 * time.Second,
 		Checks: CheckConfig{
 			Pods:          true,
 			Events:        false,

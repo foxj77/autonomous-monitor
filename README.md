@@ -148,6 +148,7 @@ All configuration is environment-driven.
 | `REDPANDA_BROKER` | `localhost:9092` | Kafka-compatible broker |
 | `FINDINGS_TOPIC` | `k8s.namespace.findings` | Topic for JSON findings |
 | `PUBLISH_TIMEOUT` | `10s` | How long to wait for broker delivery confirmation before retrying later |
+| `CHECK_TIMEOUT` | `30s` | Maximum time a single check family can spend in one poll |
 | `STATE_CONFIGMAP_NAME` | `autonomous-monitor-state` | Per-namespace state CM |
 | `STATE_WRITE_INTERVAL` | `60s` | Throttle for state CM writes |
 | `RESOLVED_FINDING_RETENTION` | `24h` | Drop resolved findings from state after this |
