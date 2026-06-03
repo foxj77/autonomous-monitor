@@ -1,7 +1,8 @@
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: autonomous-monitor
+  namespace: default
 rules:
   # Core resources, namespaced
   - apiGroups: [""]
@@ -30,23 +31,12 @@ rules:
     resources:
       - horizontalpodautoscalers
     verbs: [get, list, watch]
-  # Custom resources. Granting list on a CRD group is the cleanest approach.
-  # Restrict the resource list per your actual installed CRDs in production
-  # overlays.
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: [get, list, watch]
----
-# Per-namespace Role: only needed for state ConfigMap writes.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: autonomous-monitor
-  namespace: default
-rules:
+  # State ConfigMap writes. Reads are included in the core configmaps rule above.
   - apiGroups: [""]
     resources: [configmaps]
-    verbs: [get, create, update, patch]
+    verbs: [create, update, patch]
+  # To monitor custom resources, add namespaced get/list/watch rules for the
+  # specific API groups and resources you want in an overlay.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -56,19 +46,6 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: autonomous-monitor
-subjects:
-  - kind: ServiceAccount
-    name: autonomous-monitor
-    namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: autonomous-monitor
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
   name: autonomous-monitor
 subjects:
   - kind: ServiceAccount
