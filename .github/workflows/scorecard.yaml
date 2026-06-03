@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  security-events: write
   actions: read
 
 jobs:
