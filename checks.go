@@ -588,6 +588,7 @@ func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkRe
 		obs.MemorySamplesPct = appendMemSample(obs.MemorySamplesPct, pct, 5)
 		obs.LastResourceSample = now
 		m.dirty = true
+		resourceSamples.WithLabelValues(m.cfg.Namespace, m.cfg.ResourceUsageBackend).Inc()
 
 		trending, trendNote := memoryTrending(obs.MemorySamplesPct)
 		evidence := []string{

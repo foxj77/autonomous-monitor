@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 )
 
@@ -786,11 +789,62 @@ func TestCheckCustomResourcesReportsFalseCondition(t *testing.T) {
 	}
 }
 
-func newTestMonitor(client *fake.Clientset, _ *metricsfake.Clientset, dyn *dynfake.FakeDynamicClient, namespace string) *Monitor {
+func TestCheckResourceUsageIncrementsSampleMetric(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "app",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+			}},
+		}}},
+	})
+	metricsClient := metricsfake.NewSimpleClientset()
+	metricsClient.Fake.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() != "ns1" {
+			t.Fatalf("metrics list namespace = %q, want ns1", action.GetNamespace())
+		}
+		return true, &metricsv1beta1.PodMetricsList{Items: []metricsv1beta1.PodMetrics{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"},
+			Containers: []metricsv1beta1.ContainerMetrics{{
+				Name: "app",
+				Usage: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("50Mi"),
+				},
+			}},
+		}}}, nil
+	})
+	monitor := newTestMonitor(client, metricsClient, nil, "ns1")
+	monitor.cfg.ResourceUsageBackend = "metrics-server"
+
+	counter := resourceSamples.WithLabelValues("ns1", "metrics-server")
+	before := counterValue(t, counter)
+	result := monitor.checkResourceUsage(ctx, time.Now().UTC())
+	after := counterValue(t, counter)
+
+	if !result.complete {
+		t.Fatal("resource usage check should complete")
+	}
+	if after-before != 1 {
+		t.Fatalf("resource sample counter delta = %v, want 1", after-before)
+	}
+}
+
+func counterValue(t *testing.T, counter interface{ Write(*dto.Metric) error }) float64 {
+	t.Helper()
+	var metric dto.Metric
+	if err := counter.Write(&metric); err != nil {
+		t.Fatalf("read counter: %v", err)
+	}
+	return metric.GetCounter().GetValue()
+}
+
+func newTestMonitor(client *fake.Clientset, metricsClient *metricsfake.Clientset, dyn *dynfake.FakeDynamicClient, namespace string) *Monitor {
 	cfg := testConfig(namespace)
 	store := NewStateStore(client, namespace, "autonomous-monitor-state")
 	state := newMonitorState(namespace)
-	return NewMonitor(cfg, client, nil, dyn, &recordingPublisher{}, store, state)
+	return NewMonitor(cfg, client, metricsClient, dyn, &recordingPublisher{}, store, state)
 }
 
 func disableAllExcept(m *Monitor, active string) {

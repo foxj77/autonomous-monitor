@@ -38,7 +38,6 @@ type Config struct {
 	ResourceUsageBackend     string
 	MemoryWarningPercent     int
 	MemoryCriticalPercent    int
-	CPUWarningPercent        int
 	RestartWarningCount      int32
 	RestartWindow            time.Duration
 	EventLookback            time.Duration
@@ -72,7 +71,6 @@ func LoadConfig() Config {
 		ResourceUsageBackend:     resourceBackend,
 		MemoryWarningPercent:     intEnv("MEMORY_WARNING_PERCENT", 80),
 		MemoryCriticalPercent:    intEnv("MEMORY_CRITICAL_PERCENT", 90),
-		CPUWarningPercent:        intEnv("CPU_WARNING_PERCENT", 80),
 		RestartWarningCount:      clampInt32(intEnv("RESTART_WARNING_COUNT", 3), 1, 1000),
 		RestartWindow:            durationEnv("RESTART_WINDOW", 10*time.Minute),
 		EventLookback:            durationEnv("EVENT_LOOKBACK", 30*time.Minute),
