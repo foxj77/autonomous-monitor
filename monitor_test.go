@@ -287,7 +287,7 @@ func TestPollTimesOutSlowCheck(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	checkStarted := make(chan struct{})
 	checkDone := make(chan struct{})
-	client.Fake.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+	client.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
 		close(checkStarted)
 		time.Sleep(200 * time.Millisecond)
 		close(checkDone)
