@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,8 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynfake "k8s.io/client-go/dynamic/fake"
-	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 )
 
 func TestNewFindingShape(t *testing.T) {
@@ -128,18 +129,18 @@ func TestScoreWaitingReason(t *testing.T) {
 
 func TestScoreEventReason(t *testing.T) {
 	cases := map[string]int{
-		"FailedScheduling":    75,
-		"FailedMount":         75,
-		"FailedAttachVolume":  75,
-		"BackOff":             70,
-		"CrashLoopBackOff":    70,
-		"Unhealthy":           70,
-		"OOMKilled":           70,
-		"OOMKilling":          70,
-		"Failed":              65,
-		"FailedSync":          65,
+		"FailedScheduling":     75,
+		"FailedMount":          75,
+		"FailedAttachVolume":   75,
+		"BackOff":              70,
+		"CrashLoopBackOff":     70,
+		"Unhealthy":            70,
+		"OOMKilled":            70,
+		"OOMKilling":           70,
+		"Failed":               65,
+		"FailedSync":           65,
 		"ReconciliationFailed": 65,
-		"SomethingElse":       50,
+		"SomethingElse":        50,
 	}
 	for reason, want := range cases {
 		if got := scoreEventReason(reason); got != want {
@@ -303,15 +304,15 @@ func TestShouldScanLogs(t *testing.T) {
 		t.Error("container in CrashLoopBackOff should trigger log scan")
 	}
 	healthy := corev1.Pod{Status: corev1.PodStatus{
-		Conditions:     []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+		Conditions:        []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		ContainerStatuses: []corev1.ContainerStatus{{RestartCount: 1}},
 	}}
 	if shouldScanLogs(healthy, 3) {
 		t.Error("healthy pod with low restarts should not trigger log scan")
 	}
 	restarting := corev1.Pod{Status: corev1.PodStatus{
-		Conditions:         []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		ContainerStatuses:  []corev1.ContainerStatus{{RestartCount: 5}},
+		Conditions:        []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+		ContainerStatuses: []corev1.ContainerStatus{{RestartCount: 5}},
 	}}
 	if !shouldScanLogs(restarting, 3) {
 		t.Error("pod above restart threshold should trigger log scan")
@@ -548,6 +549,157 @@ func TestCheckWorkloadsReportsStatefulSetBelowDesired(t *testing.T) {
 	}
 }
 
+func TestCheckServicesReportsSelectorWithNoPods(t *testing.T) {
+	ctx := context.Background()
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "api"},
+			Ports:    []corev1.ServicePort{{Port: 80}},
+		},
+	}
+	client := fake.NewSimpleClientset(service)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "services")
+
+	result := monitor.checkServices(ctx)
+	if !result.complete {
+		t.Fatal("check should be complete")
+	}
+	if len(result.findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(result.findings))
+	}
+	if result.findings[0].Check != "service" || result.findings[0].Reason != "selector-matches-no-pods" {
+		t.Fatalf("unexpected finding: %+v", result.findings[0])
+	}
+}
+
+func TestCheckServicesSkipsSelectorWithMatchingPod(t *testing.T) {
+	ctx := context.Background()
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "api"},
+			Ports:    []corev1.ServicePort{{Port: 80}},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-0",
+			Namespace: "ns1",
+			Labels:    map[string]string{"app": "api"},
+		},
+	}
+	client := fake.NewSimpleClientset(service, pod)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "services")
+
+	result := monitor.checkServices(ctx)
+	if len(result.findings) != 0 {
+		t.Fatalf("expected no findings, got %+v", result.findings)
+	}
+}
+
+func TestCheckServicesReportsPendingLoadBalancer(t *testing.T) {
+	ctx := context.Background()
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "public", Namespace: "ns1"},
+		Spec: corev1.ServiceSpec{
+			Type:  corev1.ServiceTypeLoadBalancer,
+			Ports: []corev1.ServicePort{{Port: 443}},
+		},
+	}
+	client := fake.NewSimpleClientset(service)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "services")
+
+	result := monitor.checkServices(ctx)
+	if len(result.findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(result.findings))
+	}
+	if result.findings[0].Reason != "load-balancer-pending" {
+		t.Fatalf("reason = %q, want load-balancer-pending", result.findings[0].Reason)
+	}
+}
+
+func TestCheckPVCsReportsPendingAndLostClaims(t *testing.T) {
+	ctx := context.Background()
+	pending := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pending", Namespace: "ns1"},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	lost := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "lost", Namespace: "ns1"},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimLost},
+	}
+	client := fake.NewSimpleClientset(pending, lost)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "pvcs")
+
+	result := monitor.checkPVCs(ctx)
+	reasons := map[string]bool{}
+	for _, finding := range result.findings {
+		reasons[finding.Reason] = true
+	}
+	if !reasons["pending"] || !reasons["lost"] {
+		t.Fatalf("expected pending and lost PVC findings, got %+v", result.findings)
+	}
+}
+
+func TestCheckPVCsReportsTrueConditions(t *testing.T) {
+	ctx := context.Background()
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "ns1"},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+			Conditions: []corev1.PersistentVolumeClaimCondition{
+				{Type: corev1.PersistentVolumeClaimFileSystemResizePending, Status: corev1.ConditionTrue, Message: "waiting for pod restart"},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pvc)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "pvcs")
+
+	result := monitor.checkPVCs(ctx)
+	if len(result.findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(result.findings))
+	}
+	if result.findings[0].Reason != "condition-file-system-resize-pending-true" {
+		t.Fatalf("reason = %q, want condition-file-system-resize-pending-true", result.findings[0].Reason)
+	}
+}
+
+func TestCheckScalingReportsHPAConditionsAndReplicaPressure(t *testing.T) {
+	ctx := context.Background()
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns1"},
+		Spec:       autoscalingv2.HorizontalPodAutoscalerSpec{MaxReplicas: 5},
+		Status: autoscalingv2.HorizontalPodAutoscalerStatus{
+			CurrentReplicas: 5,
+			DesiredReplicas: 5,
+			Conditions: []autoscalingv2.HorizontalPodAutoscalerCondition{
+				{Type: autoscalingv2.ScalingActive, Status: corev1.ConditionFalse, Reason: "FailedGetResourceMetric"},
+				{Type: autoscalingv2.ScalingLimited, Status: corev1.ConditionTrue, Reason: "TooManyReplicas"},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(hpa)
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	disableAllExcept(monitor, "scaling")
+
+	result := monitor.checkScaling(ctx)
+	reasons := map[string]bool{}
+	for _, finding := range result.findings {
+		reasons[finding.Reason] = true
+	}
+	for _, want := range []string{"scaling-active-false", "scaling-limited", "max-replicas-reached"} {
+		if !reasons[want] {
+			t.Fatalf("expected %q finding, got %+v", want, result.findings)
+		}
+	}
+}
+
 func TestCheckCustomResourcesReportsGenerationLag(t *testing.T) {
 	ctx := context.Background()
 
@@ -659,8 +811,8 @@ func newDeployment(name string, replicas *int32, available int32) appsv1.Deploym
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns1", Generation: 1},
 		Spec:       appsv1.DeploymentSpec{Replicas: replicas},
 		Status: appsv1.DeploymentStatus{
-			AvailableReplicas:   available,
-			ObservedGeneration:  1,
+			AvailableReplicas:  available,
+			ObservedGeneration: 1,
 		},
 	}
 }

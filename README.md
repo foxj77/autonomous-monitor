@@ -29,7 +29,9 @@ One monitor per namespace. No cluster-wide permissions. No port forwarding. No e
   - Resource usage (memory % of limit, trend detection — `metrics-server` backend)
   - Custom resources (dynamic-client discovery, `observedGeneration` lag, condition health)
   - Logs (tail last N lines, scan for panics, fatal, OOMKilled, TLS errors, repeated errors)
-  - Services, PVCs, Scaling (HPA)
+  - Services (selectors matching no pods, pending LoadBalancers)
+  - PVCs (Pending / Lost claims, true PVC conditions)
+  - Scaling (HPA unhealthy conditions, maxed-out replicas, desired replica lag)
 - **Stateful**: persists findings, restart counts, memory samples in a ConfigMap
 - **Suppression**: optional `ConfigMap` keyed by `kind/name/reason` with `*` wildcards
 - **AI cooldowns**: throttle expensive downstream AI calls per finding and per severity band
@@ -166,12 +168,12 @@ All configuration is environment-driven.
 | `CHECK_EVENTS_ENABLED` | `true` | |
 | `CHECK_LOGS_ENABLED` | `true` | |
 | `CHECK_WORKLOADS_ENABLED` | `true` | |
-| `CHECK_SCALING_ENABLED` | `true` | |
+| `CHECK_SCALING_ENABLED` | `true` | HPA condition and replica pressure checks |
 | `CHECK_RESOURCE_USAGE_ENABLED` | `true` | (set `RESOURCE_USAGE_BACKEND=disabled` to also disable the metrics client) |
 | `CHECK_RESOURCE_SPECS_ENABLED` | `true` | |
 | `CHECK_CUSTOM_RESOURCES_ENABLED` | `true` | |
-| `CHECK_SERVICES_ENABLED` | `true` | |
-| `CHECK_PVCS_ENABLED` | `true` | |
+| `CHECK_SERVICES_ENABLED` | `true` | Service selector and LoadBalancer checks |
+| `CHECK_PVCS_ENABLED` | `true` | PVC phase and condition checks |
 
 ## Output contract
 

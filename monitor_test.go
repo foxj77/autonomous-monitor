@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -192,6 +194,90 @@ func TestResourceSpecsRunsWhenPodHealthDisabled(t *testing.T) {
 		if finding.Check == "pod-health" {
 			t.Fatalf("unexpected pod-health finding when CHECK_PODS_ENABLED=false: %+v", finding)
 		}
+	}
+}
+
+func TestConfiguredChecksAreWiredIntoPoll(t *testing.T) {
+	cases := []struct {
+		name      string
+		active    string
+		objects   []runtime.Object
+		wantCheck string
+	}{
+		{
+			name:   "services",
+			active: "services",
+			objects: []runtime.Object{
+				&corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{"app": "api"},
+						Ports:    []corev1.ServicePort{{Port: 80}},
+					},
+				},
+			},
+			wantCheck: "service",
+		},
+		{
+			name:   "pvcs",
+			active: "pvcs",
+			objects: []runtime.Object{
+				&corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "ns1"},
+					Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+				},
+			},
+			wantCheck: "pvc",
+		},
+		{
+			name:   "scaling",
+			active: "scaling",
+			objects: []runtime.Object{
+				&autoscalingv2.HorizontalPodAutoscaler{
+					ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns1"},
+					Spec:       autoscalingv2.HorizontalPodAutoscalerSpec{MaxReplicas: 5},
+					Status: autoscalingv2.HorizontalPodAutoscalerStatus{
+						CurrentReplicas: 1,
+						DesiredReplicas: 3,
+					},
+				},
+			},
+			wantCheck: "scaling",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(tc.objects...)
+			store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+			state, err := store.Load(context.Background())
+			if err != nil {
+				t.Fatalf("Load state: %v", err)
+			}
+			cfg := testConfig("ns1")
+			cfg.Checks = CheckConfig{}
+			switch tc.active {
+			case "services":
+				cfg.Checks.Services = true
+			case "pvcs":
+				cfg.Checks.PVCs = true
+			case "scaling":
+				cfg.Checks.Scaling = true
+			default:
+				t.Fatalf("unhandled check family %q", tc.active)
+			}
+			publisher := &recordingPublisher{}
+			monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+
+			monitor.Poll(context.Background())
+
+			for _, finding := range publisher.findings {
+				if finding.Check == tc.wantCheck {
+					return
+				}
+			}
+			t.Fatalf("expected %q finding from wired poll check, got %+v", tc.wantCheck, publisher.findings)
+		})
 	}
 }
 

@@ -65,6 +65,21 @@ func (m *Monitor) Poll(ctx context.Context) {
 		complete = complete && result.complete
 		m.collectFindings(ctx, result.findings, now, active)
 	}
+	if m.cfg.Checks.Services {
+		result := m.checkServices(ctx)
+		complete = complete && result.complete
+		m.collectFindings(ctx, result.findings, now, active)
+	}
+	if m.cfg.Checks.PVCs {
+		result := m.checkPVCs(ctx)
+		complete = complete && result.complete
+		m.collectFindings(ctx, result.findings, now, active)
+	}
+	if m.cfg.Checks.Scaling {
+		result := m.checkScaling(ctx)
+		complete = complete && result.complete
+		m.collectFindings(ctx, result.findings, now, active)
+	}
 	if m.cfg.Checks.Logs {
 		result := m.checkLogs(ctx)
 		complete = complete && result.complete
