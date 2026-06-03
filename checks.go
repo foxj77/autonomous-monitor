@@ -791,16 +791,21 @@ func (m *Monitor) customResourceAllowed(gvr schema.GroupVersionResource) bool {
 }
 
 func matchesCustomResourcePattern(patterns []string, gvr schema.GroupVersionResource) bool {
+	candidates := []string{
+		gvr.Group,
+		gvr.Group + "/" + gvr.Resource,
+		gvr.Group + "/" + gvr.Version + "/" + gvr.Resource,
+		gvr.Group + "/*",
+		gvr.Group + "/" + gvr.Version + "/*",
+	}
 	for _, pattern := range patterns {
 		if pattern == "" {
 			continue
 		}
-		if pattern == strings.ToLower(gvr.Group) ||
-			pattern == strings.ToLower(gvr.Group+"/"+gvr.Resource) ||
-			pattern == strings.ToLower(gvr.Group+"/"+gvr.Version+"/"+gvr.Resource) ||
-			pattern == strings.ToLower(gvr.Group+"/*") ||
-			pattern == strings.ToLower(gvr.Group+"/"+gvr.Version+"/*") {
-			return true
+		for _, candidate := range candidates {
+			if strings.EqualFold(pattern, candidate) {
+				return true
+			}
 		}
 	}
 	return false
