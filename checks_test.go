@@ -801,7 +801,7 @@ func TestCheckResourceUsageIncrementsSampleMetric(t *testing.T) {
 		}}},
 	})
 	metricsClient := metricsfake.NewSimpleClientset()
-	metricsClient.Fake.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+	metricsClient.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		if action.GetNamespace() != "ns1" {
 			t.Fatalf("metrics list namespace = %q, want ns1", action.GetNamespace())
 		}
