@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -666,27 +667,39 @@ func (m *Monitor) checkCustomResources(ctx context.Context) checkResult {
 		return checkResult{complete: true}
 	}
 
-	_, apiLists, err := m.kube.Discovery().ServerGroupsAndResources()
+	apiLists, err := m.customResourceAPILists()
 	if err != nil {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "custom-resources", "error").Inc()
+		customResourceScans.WithLabelValues(m.cfg.Namespace, "error").Inc()
+		log.Printf("ERROR: custom resource discovery failed: %v", err)
 		return checkResult{complete: false}
 	}
 
 	var findings []Finding
+	scanned := 0
+	skipped := 0
+	errors := 0
 	for _, apiList := range apiLists {
 		gv, err := schema.ParseGroupVersion(apiList.GroupVersion)
 		if err != nil || gv.Group == "" || isBuiltinGroup(gv.Group) {
 			continue
 		}
 		for _, res := range apiList.APIResources {
-			if !res.Namespaced || !contains(res.Verbs, "list") {
+			gvr := schema.GroupVersionResource{Group: gv.Group, Version: gv.Version, Resource: res.Name}
+			if !res.Namespaced || !contains(res.Verbs, "list") || !m.customResourceAllowed(gvr) {
+				skipped++
+				customResourceScans.WithLabelValues(m.cfg.Namespace, "skipped").Inc()
 				continue
 			}
-			gvr := schema.GroupVersionResource{Group: gv.Group, Version: gv.Version, Resource: res.Name}
 			list, err := m.dynamic.Resource(gvr).Namespace(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
 			if err != nil {
-				continue // RBAC denial or resource unavailable — skip silently
+				errors++
+				customResourceScans.WithLabelValues(m.cfg.Namespace, "error").Inc()
+				log.Printf("WARN: custom resource list failed namespace=%s gvr=%s: %v", m.cfg.Namespace, gvr.String(), err)
+				continue // RBAC denial or resource unavailable.
 			}
+			scanned++
+			customResourceScans.WithLabelValues(m.cfg.Namespace, "scanned").Inc()
 			checksTotal.WithLabelValues(m.cfg.Namespace, "custom-resources", "ok").Inc()
 
 			for i := range list.Items {
@@ -738,7 +751,59 @@ func (m *Monitor) checkCustomResources(ctx context.Context) checkResult {
 		}
 	}
 
+	if scanned > 0 || skipped > 0 || errors > 0 {
+		log.Printf("custom resource scan namespace=%s scanned=%d skipped=%d errors=%d findings=%d",
+			m.cfg.Namespace, scanned, skipped, errors, len(findings))
+	}
 	return checkResult{findings: findings, complete: true}
+}
+
+func (m *Monitor) customResourceAPILists() ([]*metav1.APIResourceList, error) {
+	now := time.Now()
+	if len(m.customResourceDiscovery) > 0 && now.Before(m.customResourceDiscoveryExpires) {
+		return m.customResourceDiscovery, nil
+	}
+
+	_, apiLists, err := m.kube.Discovery().ServerGroupsAndResources()
+	if err != nil {
+		return nil, err
+	}
+
+	ttl := m.cfg.CustomResourceDiscoveryTTL
+	if ttl > 0 {
+		m.customResourceDiscovery = apiLists
+		m.customResourceDiscoveryExpires = now.Add(ttl)
+	} else {
+		m.customResourceDiscovery = nil
+		m.customResourceDiscoveryExpires = time.Time{}
+	}
+	return apiLists, nil
+}
+
+func (m *Monitor) customResourceAllowed(gvr schema.GroupVersionResource) bool {
+	if matchesCustomResourcePattern(m.cfg.CustomResourceExcludelist, gvr) {
+		return false
+	}
+	if len(m.cfg.CustomResourceAllowlist) == 0 {
+		return true
+	}
+	return matchesCustomResourcePattern(m.cfg.CustomResourceAllowlist, gvr)
+}
+
+func matchesCustomResourcePattern(patterns []string, gvr schema.GroupVersionResource) bool {
+	for _, pattern := range patterns {
+		if pattern == "" {
+			continue
+		}
+		if pattern == strings.ToLower(gvr.Group) ||
+			pattern == strings.ToLower(gvr.Group+"/"+gvr.Resource) ||
+			pattern == strings.ToLower(gvr.Group+"/"+gvr.Version+"/"+gvr.Resource) ||
+			pattern == strings.ToLower(gvr.Group+"/*") ||
+			pattern == strings.ToLower(gvr.Group+"/"+gvr.Version+"/*") {
+			return true
+		}
+	}
+	return false
 }
 
 func isBuiltinGroup(group string) bool {
