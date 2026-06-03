@@ -9,9 +9,11 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -244,6 +246,146 @@ func deploymentFindings(namespace string, deployment appsv1.Deployment) []Findin
 			fmt.Sprintf("observed generation=%d metadata generation=%d", deployment.Status.ObservedGeneration, deployment.Generation),
 		}))
 	}
+	return findings
+}
+
+func (m *Monitor) checkServices(ctx context.Context) checkResult {
+	services, err := m.kube.CoreV1().Services(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		checksTotal.WithLabelValues(m.cfg.Namespace, "services", "error").Inc()
+		return checkResult{complete: false}
+	}
+	checksTotal.WithLabelValues(m.cfg.Namespace, "services", "ok").Inc()
+
+	var findings []Finding
+	for _, svc := range services.Items {
+		if svc.DeletionTimestamp != nil || svc.Spec.Type == corev1.ServiceTypeExternalName {
+			continue
+		}
+
+		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && len(svc.Status.LoadBalancer.Ingress) == 0 {
+			findings = append(findings, NewFinding(m.cfg.Namespace, "Service", svc.Name, "service", "load-balancer-pending", 55, []string{
+				"service type LoadBalancer has no ingress assigned",
+			}))
+		}
+
+		if len(svc.Spec.Selector) == 0 {
+			continue
+		}
+		selector := labels.SelectorFromSet(svc.Spec.Selector).String()
+		pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			checksTotal.WithLabelValues(m.cfg.Namespace, "services", "error").Inc()
+			return checkResult{findings: findings, complete: false}
+		}
+		if countLivePods(pods.Items) == 0 {
+			findings = append(findings, NewFinding(m.cfg.Namespace, "Service", svc.Name, "service", "selector-matches-no-pods", 60, []string{
+				fmt.Sprintf("service selector %q matches no live pods", selector),
+			}))
+		}
+	}
+	return checkResult{findings: findings, complete: true}
+}
+
+func countLivePods(pods []corev1.Pod) int {
+	count := 0
+	for _, pod := range pods {
+		if pod.DeletionTimestamp == nil {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *Monitor) checkPVCs(ctx context.Context) checkResult {
+	pvcs, err := m.kube.CoreV1().PersistentVolumeClaims(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		checksTotal.WithLabelValues(m.cfg.Namespace, "pvcs", "error").Inc()
+		return checkResult{complete: false}
+	}
+	checksTotal.WithLabelValues(m.cfg.Namespace, "pvcs", "ok").Inc()
+
+	var findings []Finding
+	for _, pvc := range pvcs.Items {
+		if pvc.DeletionTimestamp != nil {
+			continue
+		}
+		switch pvc.Status.Phase {
+		case corev1.ClaimPending:
+			findings = append(findings, NewFinding(m.cfg.Namespace, "PersistentVolumeClaim", pvc.Name, "pvc", "pending", 60, []string{
+				"persistent volume claim is Pending",
+			}))
+		case corev1.ClaimLost:
+			findings = append(findings, NewFinding(m.cfg.Namespace, "PersistentVolumeClaim", pvc.Name, "pvc", "lost", 85, []string{
+				"persistent volume claim is Lost",
+			}))
+		}
+
+		for _, condition := range pvc.Status.Conditions {
+			if condition.Status != corev1.ConditionTrue {
+				continue
+			}
+			reason := "condition-" + normalizeReason(string(condition.Type)) + "-true"
+			evidence := []string{fmt.Sprintf("condition %s=True", condition.Type)}
+			if condition.Message != "" {
+				evidence = append(evidence, condition.Message)
+			}
+			findings = append(findings, NewFinding(m.cfg.Namespace, "PersistentVolumeClaim", pvc.Name, "pvc", reason, 55, evidence))
+		}
+	}
+	return checkResult{findings: findings, complete: true}
+}
+
+func (m *Monitor) checkScaling(ctx context.Context) checkResult {
+	hpas, err := m.kube.AutoscalingV2().HorizontalPodAutoscalers(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		checksTotal.WithLabelValues(m.cfg.Namespace, "scaling", "error").Inc()
+		return checkResult{complete: false}
+	}
+	checksTotal.WithLabelValues(m.cfg.Namespace, "scaling", "ok").Inc()
+
+	var findings []Finding
+	for _, hpa := range hpas.Items {
+		if hpa.DeletionTimestamp != nil {
+			continue
+		}
+		findings = append(findings, hpaFindings(m.cfg.Namespace, hpa)...)
+	}
+	return checkResult{findings: findings, complete: true}
+}
+
+func hpaFindings(namespace string, hpa autoscalingv2.HorizontalPodAutoscaler) []Finding {
+	var findings []Finding
+	for _, condition := range hpa.Status.Conditions {
+		evidence := []string{fmt.Sprintf("condition %s=%s", condition.Type, condition.Status)}
+		if condition.Reason != "" {
+			evidence = append(evidence, fmt.Sprintf("reason=%s", condition.Reason))
+		}
+		if condition.Message != "" {
+			evidence = append(evidence, condition.Message)
+		}
+
+		switch {
+		case condition.Type == autoscalingv2.ScalingActive && condition.Status == corev1.ConditionFalse:
+			findings = append(findings, NewFinding(namespace, "HorizontalPodAutoscaler", hpa.Name, "scaling", "scaling-active-false", 70, evidence))
+		case condition.Type == autoscalingv2.AbleToScale && condition.Status == corev1.ConditionFalse:
+			findings = append(findings, NewFinding(namespace, "HorizontalPodAutoscaler", hpa.Name, "scaling", "able-to-scale-false", 65, evidence))
+		case condition.Type == autoscalingv2.ScalingLimited && condition.Status == corev1.ConditionTrue:
+			findings = append(findings, NewFinding(namespace, "HorizontalPodAutoscaler", hpa.Name, "scaling", "scaling-limited", 55, evidence))
+		}
+	}
+
+	if hpa.Status.CurrentReplicas >= hpa.Spec.MaxReplicas && hpa.Status.DesiredReplicas >= hpa.Spec.MaxReplicas {
+		findings = append(findings, NewFinding(namespace, "HorizontalPodAutoscaler", hpa.Name, "scaling", "max-replicas-reached", 65, []string{
+			fmt.Sprintf("current replicas=%d desired replicas=%d max replicas=%d", hpa.Status.CurrentReplicas, hpa.Status.DesiredReplicas, hpa.Spec.MaxReplicas),
+		}))
+	}
+	if hpa.Status.DesiredReplicas > hpa.Status.CurrentReplicas {
+		findings = append(findings, NewFinding(namespace, "HorizontalPodAutoscaler", hpa.Name, "scaling", "desired-replicas-above-current", 55, []string{
+			fmt.Sprintf("desired replicas=%d current replicas=%d", hpa.Status.DesiredReplicas, hpa.Status.CurrentReplicas),
+		}))
+	}
+
 	return findings
 }
 

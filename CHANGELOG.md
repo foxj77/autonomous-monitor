@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Delivery-aware publishing: Kafka sends now wait for broker delivery confirmation, failed publishes are retried, and publish attempts are exposed via metrics
 - `PUBLISH_TIMEOUT` configuration for bounding Kafka delivery confirmation waits
 - Release workflow now publishes raw binaries as a separate `<tag>-binary` OCI artifact, keeping container image tags unambiguous
+- Service, PVC, and HPA scaling checks are now implemented and wired into the monitor poll loop
+- Poll-level tests now verify configured check families actually run when enabled
 
 ## [0.1.0] - 2026-06-01
 
