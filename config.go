@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -21,36 +22,36 @@ type CheckConfig struct {
 }
 
 type Config struct {
-	Namespace                  string
-	PollInterval               time.Duration
-	MetricsPort                string
-	RedpandaBroker             string
-	FindingsTopic              string
-	PublishTimeout             time.Duration
-	CheckTimeout               time.Duration
-	StateConfigMapName         string
-	StateWriteInterval         time.Duration
-	ResolvedFindingRetention   time.Duration
-	ObservationRetention       time.Duration
-	MaxObservations            int
-	MaxFindings                int
-	MaxStateBytes              int
-	AITriageEnabled            bool
-	AIMinScore                 int
-	AICooldown                 time.Duration
-	AICooldownIncident         time.Duration
-	LogScanLines               int
-	ResourceUsageBackend       string
-	MemoryWarningPercent       int
-	MemoryCriticalPercent      int
-	RestartWarningCount        int32
-	RestartWindow              time.Duration
-	EventLookback              time.Duration
-	SuppressConfigMapName      string
-	CustomResourceAllowlist    []string
-	CustomResourceExcludelist  []string
-	CustomResourceDiscoveryTTL time.Duration
-	Checks                     CheckConfig
+	Namespace                    string
+	PollInterval                 time.Duration
+	MetricsPort                  string
+	RedpandaBroker               string
+	FindingsTopic                string
+	PublishTimeout               time.Duration
+	CheckTimeout                 time.Duration
+	StateConfigMapName           string
+	StateWriteInterval           time.Duration
+	ResolvedFindingRetention     time.Duration
+	ObservationRetention         time.Duration
+	MaxObservations              int
+	MaxFindings                  int
+	MaxStateBytes                int
+	DownstreamTriageEnabled      bool
+	DownstreamMinScore           int
+	DownstreamCooldown           time.Duration
+	DownstreamCooldownIncident   time.Duration
+	LogScanLines                 int
+	ResourceUsageBackend         string
+	MemoryWarningPercent         int
+	MemoryCriticalPercent        int
+	RestartWarningCount          int32
+	RestartWindow                time.Duration
+	EventLookback                time.Duration
+	SuppressConfigMapName        string
+	CustomResourceAllowlist      []string
+	CustomResourceExcludelist    []string
+	CustomResourceDiscoveryTTL   time.Duration
+	Checks                       CheckConfig
 }
 
 func LoadConfig() Config {
@@ -75,10 +76,10 @@ func LoadConfig() Config {
 		MaxObservations:            intEnv("MAX_OBSERVATIONS", 5000),
 		MaxFindings:                intEnv("MAX_FINDINGS", 2000),
 		MaxStateBytes:              intEnv("MAX_STATE_BYTES", 900*1024),
-		AITriageEnabled:            boolEnvDefaultOn("AI_TRIAGE_ENABLED"),
-		AIMinScore:                 intEnv("AI_MIN_SCORE", 60),
-		AICooldown:                 durationEnv("AI_COOLDOWN", 30*time.Minute),
-		AICooldownIncident:         durationEnv("AI_COOLDOWN_INCIDENT", 10*time.Minute),
+		DownstreamTriageEnabled:    downstreamTriageEnabled(),
+		DownstreamMinScore:         downstreamMinScore(),
+		DownstreamCooldown:         durationEnv("DOWNSTREAM_COOLDOWN", durationEnv("AI_COOLDOWN", 30*time.Minute)),
+		DownstreamCooldownIncident: durationEnv("DOWNSTREAM_COOLDOWN_INCIDENT", durationEnv("AI_COOLDOWN_INCIDENT", 10*time.Minute)),
 		SuppressConfigMapName:      env("SUPPRESS_CONFIGMAP", ""),
 		LogScanLines:               intEnv("LOG_SCAN_LINES", 100),
 		ResourceUsageBackend:       resourceBackend,
@@ -103,6 +104,51 @@ func LoadConfig() Config {
 			PVCs:           boolEnvDefaultOn("CHECK_PVCS_ENABLED"),
 		},
 	}
+}
+
+// downstreamTriageEnabled reads DOWNSTREAM_TRIAGE_ENABLED and falls back to the
+// deprecated AI_TRIAGE_ENABLED alias. The monitor never calls a model itself —
+// it sets ai_triage_required on findings so a downstream consumer can dispatch
+// triage. The env var name was renamed to reflect that. The legacy name still
+// works to keep existing deployments working, with a one-shot deprecation log
+// emitted on first read.
+func downstreamTriageEnabled() bool {
+	if _, ok := lookupEnv("DOWNSTREAM_TRIAGE_ENABLED"); ok {
+		return boolEnvDefaultOn("DOWNSTREAM_TRIAGE_ENABLED")
+	}
+	if _, ok := lookupEnv("AI_TRIAGE_ENABLED"); ok {
+		warnDeprecated("AI_TRIAGE_ENABLED", "DOWNSTREAM_TRIAGE_ENABLED")
+		return boolEnvDefaultOn("AI_TRIAGE_ENABLED")
+	}
+	return true
+}
+
+// downstreamMinScore mirrors downstreamTriageEnabled for the score threshold.
+func downstreamMinScore() int {
+	if _, ok := lookupEnv("DOWNSTREAM_MIN_SCORE"); ok {
+		return intEnv("DOWNSTREAM_MIN_SCORE", 60)
+	}
+	if _, ok := lookupEnv("AI_MIN_SCORE"); ok {
+		warnDeprecated("AI_MIN_SCORE", "DOWNSTREAM_MIN_SCORE")
+		return intEnv("AI_MIN_SCORE", 60)
+	}
+	return 60
+}
+
+// lookupEnv returns (value, true) if the env var is set to a non-empty
+// string, mirroring the existing env() / intEnv() / durationEnv() helpers.
+// Setting an env var to "" is treated identically to leaving it unset, so
+// the codebase's "empty means default" convention is preserved.
+func lookupEnv(key string) (string, bool) {
+	v := os.Getenv(key)
+	if v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+func warnDeprecated(oldName, newName string) {
+	log.Printf("WARN: %s is deprecated and will be removed in v1.0.0; use %s instead", oldName, newName)
 }
 
 func namespace() string {

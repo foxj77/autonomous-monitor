@@ -185,11 +185,11 @@ func (m *Monitor) collectFindings(ctx context.Context, findings []Finding, now t
 		var aiDispatchRequested bool
 		var nextCooldownUntil *time.Time
 
-		if m.cfg.AITriageEnabled && finding.Score >= m.cfg.AIMinScore {
+		if m.cfg.DownstreamTriageEnabled && finding.Score >= m.cfg.DownstreamMinScore {
 			if state.CooldownUntil == nil || now.After(*state.CooldownUntil) {
-				cooldown := m.cfg.AICooldown
-				if finding.Classification == "incident-likely" && m.cfg.AICooldownIncident > 0 {
-					cooldown = m.cfg.AICooldownIncident
+				cooldown := m.cfg.DownstreamCooldown
+				if finding.Classification == "incident-likely" && m.cfg.DownstreamCooldownIncident > 0 {
+					cooldown = m.cfg.DownstreamCooldownIncident
 				}
 				cooldownUntil := now.Add(cooldown)
 				nextCooldownUntil = &cooldownUntil

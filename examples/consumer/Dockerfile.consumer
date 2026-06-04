@@ -1,0 +1,15 @@
+// Standalone build for the quickstart consumer. Multi-stage so the
+// final image is a scratch-style alpine with the static binary.
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /consumer .
+
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /consumer /consumer
+CMD ["/consumer"]

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag":        { "type": "string" },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "imagePullSecrets": { "type": "array" },
+    "nameOverride":     { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "watch": {
+      "type": "object",
+      "properties": {
+        "namespace": { "type": "string" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create":      { "type": "boolean" },
+        "name":        { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "podSecurityContext":      { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu":    { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu":    { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    },
+    "livenessProbe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds":       { "type": "integer", "minimum": 1 },
+        "timeoutSeconds":      { "type": "integer", "minimum": 1 },
+        "failureThreshold":    { "type": "integer", "minimum": 1 }
+      }
+    },
+    "readinessProbe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds":       { "type": "integer", "minimum": 1 },
+        "timeoutSeconds":      { "type": "integer", "minimum": 1 },
+        "failureThreshold":    { "type": "integer", "minimum": 1 }
+      }
+    },
+    "podAnnotations": { "type": "object" },
+    "podLabels":      { "type": "object" },
+    "nodeSelector":   { "type": "object" },
+    "tolerations":    { "type": "array" },
+    "affinity":       { "type": "object" },
+    "state": {
+      "type": "object",
+      "properties": {
+        "configMapName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "kafka": {
+      "type": "object",
+      "properties": {
+        "broker":         { "type": "string", "minLength": 1 },
+        "topic":          { "type": "string", "minLength": 1 },
+        "publishTimeout": { "type": "string" }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "properties": {
+        "pods":           { "type": "boolean" },
+        "events":         { "type": "boolean" },
+        "logs":           { "type": "boolean" },
+        "workloads":      { "type": "boolean" },
+        "scaling":        { "type": "boolean" },
+        "resourceUsage":  { "type": "boolean" },
+        "resourceSpecs":  { "type": "boolean" },
+        "customResources": { "type": "boolean" },
+        "services":       { "type": "boolean" },
+        "pvcs":           { "type": "boolean" }
+      }
+    },
+    "resourceUsage": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["metrics-server", "disabled"]
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "pollInterval":           { "type": "string" },
+        "checkTimeout":           { "type": "string" },
+        "stateWriteInterval":     { "type": "string" },
+        "resolvedFindingRetention": { "type": "string" },
+        "observationRetention":   { "type": "string" },
+        "maxObservations":        { "type": "integer", "minimum": 1 },
+        "maxFindings":            { "type": "integer", "minimum": 1 },
+        "maxStateBytes":          { "type": "integer", "minimum": 1 },
+        "memoryWarningPercent":   { "type": "integer", "minimum": 0, "maximum": 100 },
+        "memoryCriticalPercent":  { "type": "integer", "minimum": 0, "maximum": 100 },
+        "restartWarningCount":    { "type": "integer", "minimum": 1 },
+        "restartWindow":          { "type": "string" },
+        "eventLookback":          { "type": "string" },
+        "logScanLines":           { "type": "integer", "minimum": 1 }
+      }
+    },
+    "downstreamTriage": {
+      "type": "object",
+      "properties": {
+        "enabled":          { "type": "boolean" },
+        "minScore":         { "type": "integer", "minimum": 0, "maximum": 100 },
+        "cooldown":         { "type": "string" },
+        "cooldownIncident": { "type": "string" }
+      }
+    },
+    "suppression": {
+      "type": "object",
+      "properties": {
+        "configMapName": { "type": "string" }
+      }
+    },
+    "customResources": {
+      "type": "object",
+      "properties": {
+        "allowlist":   { "type": "array", "items": { "type": "string" } },
+        "excludelist": { "type": "array", "items": { "type": "string" } },
+        "discoveryTTL": { "type": "string" },
+        "rbacRules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "apiGroups": { "type": "array", "items": { "type": "string" } },
+              "resources": { "type": "array", "items": { "type": "string" } },
+              "verbs":     { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "metrics": {
+              "type": "object",
+              "properties": { "from": { "type": "object" } }
+            }
+          }
+        },
+        "egress": {
+          "type": "object",
+          "properties": {
+            "overrides": { "type": "array" }
+          }
+        }
+      }
+    }
+  }
+}

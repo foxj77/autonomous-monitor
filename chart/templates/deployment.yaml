@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "autonomous-monitor.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "autonomous-monitor.labels" . | nindent 4 }}
+spec:
+  # Replicas is fixed at 1. Two reasons:
+  #   1. The monitor is namespace-scoped by design (one monitor per
+  #      target namespace is the documented model). For multiple
+  #      namespaces, install multiple releases.
+  #   2. The state ConfigMap is the single source of truth; running
+  #      two replicas would race on writes and produce duplicate or
+  #      lost findings.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "autonomous-monitor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "autonomous-monitor.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "autonomous-monitor.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "autonomous-monitor.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: WATCH_NAMESPACE
+              value: {{ include "autonomous-monitor.watchNamespace" . | quote }}
+            - name: REDPANDA_BROKER
+              value: {{ .Values.kafka.broker | quote }}
+            - name: FINDINGS_TOPIC
+              value: {{ .Values.kafka.topic | quote }}
+            - name: PUBLISH_TIMEOUT
+              value: {{ .Values.kafka.publishTimeout | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.service.port | quote }}
+            - name: POLL_INTERVAL
+              value: {{ .Values.thresholds.pollInterval | quote }}
+            - name: CHECK_TIMEOUT
+              value: {{ .Values.thresholds.checkTimeout | quote }}
+            - name: STATE_CONFIGMAP_NAME
+              value: {{ .Values.state.configMapName | quote }}
+            - name: STATE_WRITE_INTERVAL
+              value: {{ .Values.thresholds.stateWriteInterval | quote }}
+            - name: RESOLVED_FINDING_RETENTION
+              value: {{ .Values.thresholds.resolvedFindingRetention | quote }}
+            - name: OBSERVATION_RETENTION
+              value: {{ .Values.thresholds.observationRetention | quote }}
+            - name: MAX_OBSERVATIONS
+              value: {{ .Values.thresholds.maxObservations | quote }}
+            - name: MAX_FINDINGS
+              value: {{ .Values.thresholds.maxFindings | quote }}
+            - name: MAX_STATE_BYTES
+              value: {{ .Values.thresholds.maxStateBytes | quote }}
+            - name: DOWNSTREAM_TRIAGE_ENABLED
+              value: {{ .Values.downstreamTriage.enabled | quote }}
+            - name: DOWNSTREAM_MIN_SCORE
+              value: {{ .Values.downstreamTriage.minScore | quote }}
+            - name: DOWNSTREAM_COOLDOWN
+              value: {{ .Values.downstreamTriage.cooldown | quote }}
+            - name: DOWNSTREAM_COOLDOWN_INCIDENT
+              value: {{ .Values.downstreamTriage.cooldownIncident | quote }}
+            {{- if .Values.suppression.configMapName }}
+            - name: SUPPRESS_CONFIGMAP
+              value: {{ .Values.suppression.configMapName | quote }}
+            {{- end }}
+            - name: LOG_SCAN_LINES
+              value: {{ .Values.thresholds.logScanLines | quote }}
+            - name: RESOURCE_USAGE_BACKEND
+              value: {{ .Values.resourceUsage.backend | quote }}
+            - name: MEMORY_WARNING_PERCENT
+              value: {{ .Values.thresholds.memoryWarningPercent | quote }}
+            - name: MEMORY_CRITICAL_PERCENT
+              value: {{ .Values.thresholds.memoryCriticalPercent | quote }}
+            - name: RESTART_WARNING_COUNT
+              value: {{ .Values.thresholds.restartWarningCount | quote }}
+            - name: RESTART_WINDOW
+              value: {{ .Values.thresholds.restartWindow | quote }}
+            - name: EVENT_LOOKBACK
+              value: {{ .Values.thresholds.eventLookback | quote }}
+            - name: CHECK_PODS_ENABLED
+              value: {{ .Values.checks.pods | quote }}
+            - name: CHECK_EVENTS_ENABLED
+              value: {{ .Values.checks.events | quote }}
+            - name: CHECK_LOGS_ENABLED
+              value: {{ .Values.checks.logs | quote }}
+            - name: CHECK_WORKLOADS_ENABLED
+              value: {{ .Values.checks.workloads | quote }}
+            - name: CHECK_SCALING_ENABLED
+              value: {{ .Values.checks.scaling | quote }}
+            - name: CHECK_RESOURCE_USAGE_ENABLED
+              value: {{ .Values.checks.resourceUsage | quote }}
+            - name: CHECK_RESOURCE_SPECS_ENABLED
+              value: {{ .Values.checks.resourceSpecs | quote }}
+            - name: CHECK_CUSTOM_RESOURCES_ENABLED
+              value: {{ .Values.checks.customResources | quote }}
+            - name: CHECK_SERVICES_ENABLED
+              value: {{ .Values.checks.services | quote }}
+            - name: CHECK_PVCS_ENABLED
+              value: {{ .Values.checks.pvcs | quote }}
+            {{- with .Values.customResources.allowlist }}
+            - name: CUSTOM_RESOURCE_ALLOWLIST
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.customResources.excludelist }}
+            - name: CUSTOM_RESOURCE_EXCLUDELIST
+              value: {{ join "," . | quote }}
+            {{- end }}
+            - name: CUSTOM_RESOURCE_DISCOVERY_TTL
+              value: {{ .Values.customResources.discoveryTTL | quote }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

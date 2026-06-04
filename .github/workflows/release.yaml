@@ -22,6 +22,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  CHART_REGISTRY: oci://ghcr.io/foxj77/charts
   GO_VERSION: "1.26"
 
 jobs:
@@ -278,7 +279,7 @@ jobs:
   github-release:
     name: GitHub release
     runs-on: ubuntu-latest
-    needs: [resolve-metadata, binaries, container, cosign-sign, publish-oci-artifact]
+    needs: [resolve-metadata, binaries, container, cosign-sign, publish-oci-artifact, helm-publish]
     permissions:
       contents: write
       packages: read
@@ -301,16 +302,25 @@ jobs:
           ## autonomous-monitor ${TAG}
 
           Pull the image:
+
           \`\`\`
           docker pull ghcr.io/${{ github.repository }}:${VERSION}
           \`\`\`
 
+          Install the Helm chart:
+
+          \`\`\`
+          helm install autonomous-monitor oci://ghcr.io/foxj77/charts/autonomous-monitor --version ${VERSION}
+          \`\`\`
+
           Pull the raw binaries as an OCI artifact (requires \`oras\`):
+
           \`\`\`
           oras pull ghcr.io/${{ github.repository }}:${BINARY_TAG}
           \`\`\`
 
           Verify with cosign:
+
           \`\`\`
           cosign verify ghcr.io/${{ github.repository }}:${VERSION} --certificate-identity-regexp '.*' --certificate-oidc-issuer '.*'
           \`\`\`
@@ -338,3 +348,97 @@ jobs:
             dist/sbom-linux-amd64.spdx.json
             dist/sbom-linux-arm64.spdx.json
             dist/SHA256SUMS
+
+  helm-publish:
+    name: Package and push Helm chart
+    runs-on: ubuntu-latest
+    needs: [resolve-metadata]
+    # Runs on real releases and on manual dispatches where a version is supplied.
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Extract version
+        id: version
+        # On a release event: strip the leading 'v' from the tag (v0.2.0 → 0.2.0).
+        # On a manual dispatch: use the version input directly.
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp version into Chart.yaml
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" chart/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" chart/Chart.yaml
+
+      - name: Lint chart
+        run: helm lint chart/
+
+      - name: Template chart (default values)
+        # Sanity check: the chart must render without errors at the most
+        # common install shape, and the env vars that are required for
+        # the monitor to start (WATCH_NAMESPACE, REDPANDA_BROKER,
+        # FINDINGS_TOPIC) must be present in the rendered Deployment.
+        run: |
+          helm template autonomous-monitor chart/ --namespace default > /tmp/render.yaml
+          for var in WATCH_NAMESPACE REDPANDA_BROKER FINDINGS_TOPIC \
+                     DOWNSTREAM_TRIAGE_ENABLED DOWNSTREAM_MIN_SCORE \
+                     STATE_CONFIGMAP_NAME CHECK_PODS_ENABLED; do
+            grep -q "name: $var" /tmp/render.yaml || { echo "missing $var in render"; exit 1; }
+          done
+          echo "default-values render asserts passed"
+
+      - name: Template chart (custom values + custom-resource RBAC)
+        # Verifies the values-customisation paths the README advertises:
+        # name override, image tag pin, custom CRB RBAC rules, and a
+        # restricted metrics-ingress NetworkPolicy selector.
+        run: |
+          helm template my-release chart/ --namespace flux-system \
+            --set nameOverride=autonomous-monitor \
+            --set image.tag=${{ steps.version.outputs.version }} \
+            --set customResources.rbacRules[0].apiGroups="{source.toolkit.fluxcd.io,helm.toolkit.fluxcd.io}" \
+            --set customResources.rbacRules[0].resources="{\*}" \
+            --set customResources.rbacRules[0].verbs="{get,list,watch}" \
+            --set networkPolicy.ingress.metrics.from.podSelector.matchLabels.app=prometheus \
+            > /tmp/custom.yaml
+          grep -q "source.toolkit.fluxcd.io" /tmp/custom.yaml || { echo "missing CRB rule"; exit 1; }
+          grep -q "app: prometheus" /tmp/custom.yaml || { echo "missing NP selector"; exit 1; }
+          grep -q "ghcr.io/foxj77/autonomous-monitor:${{ steps.version.outputs.version }}" /tmp/custom.yaml || { echo "missing image tag"; exit 1; }
+          echo "custom-values render asserts passed"
+
+      - name: Template chart (schema rejects invalid values)
+        # Sanity check the values.schema.json. Each --set should fail
+        # the schema check and produce a non-zero exit.
+        run: |
+          for bad in \
+            "image.pullPolicy=Sometimes" \
+            "service.type=EvilService" \
+            "resourceUsage.backend=prometheus" \
+            "thresholds.memoryCriticalPercent=200"; do
+            if helm template test chart/ --set "$bad" > /dev/null 2>&1; then
+              echo "schema failed to reject $bad"; exit 1
+            fi
+          done
+          echo "schema rejects all four invalid inputs"
+
+      - name: Package chart
+        run: helm package chart/
+
+      - name: Log in to GHCR OCI registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to GHCR OCI registry
+        run: |
+          helm push \
+            autonomous-monitor-${{ steps.version.outputs.version }}.tgz \
+            ${{ env.CHART_REGISTRY }}

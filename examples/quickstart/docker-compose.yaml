@@ -1,0 +1,79 @@
+name: autonomous-monitor-quickstart
+
+# Quickstart: run Redpanda + autonomous-monitor + a Go consumer on a single
+# Docker host. This is the fastest way to see a finding flow end-to-end.
+#
+# Usage:
+#   docker compose -f examples/quickstart/docker-compose.yaml up --build
+#   # in another terminal, create a not-ready pod in the demo namespace
+#   kubectl --kubeconfig examples/quickstart/kubeconfig.yaml apply -f examples/quickstart/broken-pod.yaml
+#   # tail the consumer log
+#   docker compose -f examples/quickstart/docker-compose.yaml logs -f consumer
+#
+# What you'll see: a single JSON line per published finding, prefixed with
+# severity and the object it describes.
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  topic-init:
+    image: redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        rpk topic create k8s.namespace.findings --partitions 1 --replicas 1
+        echo "topic ready"
+
+  monitor:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.pure
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    environment:
+      REDPANDA_BROKER: "redpanda:9092"
+      FINDINGS_TOPIC: "k8s.namespace.findings"
+      WATCH_NAMESPACE: "demo"
+      DOWNSTREAM_TRIAGE_ENABLED: "true"
+      POLL_INTERVAL: "15s"
+      METRICS_PORT: "8080"
+    ports:
+      - "8080:8080"
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER: "redpanda:9092"
+      KAFKA_TOPIC: "k8s.namespace.findings"
+      KAFKA_GROUP: "quickstart-consumer"

@@ -50,9 +50,9 @@ spec:
               value: k8s.namespace.findings
             - name: STATE_CONFIGMAP_NAME
               value: autonomous-monitor-state
-            - name: AI_TRIAGE_ENABLED
+            - name: DOWNSTREAM_TRIAGE_ENABLED
               value: "true"
-            - name: AI_MIN_SCORE
+            - name: DOWNSTREAM_MIN_SCORE
               value: "60"
             - name: POLL_INTERVAL
               value: 60s

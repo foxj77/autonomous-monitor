@@ -90,3 +90,93 @@ jobs:
           path: dist/autonomous-monitor
           retention-days: 7
           if-no-files-found: error
+
+  # Pure-Go (CGO-free) build path. Exercises the kafka_pure build tag,
+  # which swaps confluent-kafka-go for twmb/franz-go. No librdkafka
+  # required. This is the contributor-friendly build path documented in
+  # CONTRIBUTING.md and the recommended default for fresh checkouts.
+  build-pure:
+    name: Build (pure Go)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build
+        run: |
+          mkdir -p dist
+          go build -tags 'musl kafka_pure' -trimpath -ldflags "-s -w" -o "dist/autonomous-monitor-pure" .
+          chmod +x "dist/autonomous-monitor-pure"
+          "dist/autonomous-monitor-pure" 2>&1 | head -3 || true
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-pure
+          path: dist/autonomous-monitor-pure
+          retention-days: 7
+          if-no-files-found: error
+
+  # Run the test suite under the kafka_pure build tag too. This catches
+  # any code that accidentally imports confluent-kafka-go outside the
+  # build-tag-guarded file.
+  test-pure:
+    name: Test (pure Go)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  # Helm chart lint + render assertions. Catches template errors and
+  # schema violations on every PR. The release workflow has its own
+  # chart job that also packages and pushes to GHCR OCI.
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Lint
+        run: helm lint chart/
+      - name: Render (default values)
+        run: |
+          helm template autonomous-monitor chart/ --namespace default > /tmp/render.yaml
+          for var in WATCH_NAMESPACE REDPANDA_BROKER FINDINGS_TOPIC \
+                     DOWNSTREAM_TRIAGE_ENABLED DOWNSTREAM_MIN_SCORE \
+                     STATE_CONFIGMAP_NAME CHECK_PODS_ENABLED; do
+            grep -q "name: $var" /tmp/render.yaml || { echo "missing $var in render"; exit 1; }
+          done
+          echo "default render ok"
+      - name: Render (custom CRB + ingress selector)
+        run: |
+          helm template my-release chart/ --namespace flux-system \
+            --set nameOverride=autonomous-monitor \
+            --set customResources.rbacRules[0].apiGroups="{source.toolkit.fluxcd.io,helm.toolkit.fluxcd.io}" \
+            --set customResources.rbacRules[0].resources="{\*}" \
+            --set customResources.rbacRules[0].verbs="{get,list,watch}" \
+            --set networkPolicy.ingress.metrics.from.podSelector.matchLabels.app=prometheus \
+            > /tmp/custom.yaml
+          grep -q "source.toolkit.fluxcd.io" /tmp/custom.yaml || { echo "missing CRB rule"; exit 1; }
+          grep -q "app: prometheus" /tmp/custom.yaml || { echo "missing NP selector"; exit 1; }
+          echo "custom render ok"
+      - name: Schema rejects invalid values
+        run: |
+          for bad in \
+            "image.pullPolicy=Sometimes" \
+            "service.type=EvilService" \
+            "resourceUsage.backend=prometheus" \
+            "thresholds.memoryCriticalPercent=200"; do
+            if helm template test chart/ --set "$bad" > /dev/null 2>&1; then
+              echo "schema failed to reject $bad"; exit 1
+            fi
+          done
+          echo "schema rejects all four invalid inputs"

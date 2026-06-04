@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-pod
+  namespace: demo
+  labels: { app: broken }
+spec:
+  # Deliberately missing resource requests/limits to trigger the
+  # resource-spec check, and an image that does not exist so the pod
+  # spends forever in ImagePullBackOff, which triggers several check
+  # families at once. Use this against a kind/minikube cluster
+  # alongside the quickstart compose stack to see findings flow.
+  containers:
+    - name: app
+      image: ghcr.io/example/does-not-exist:v0.0.0

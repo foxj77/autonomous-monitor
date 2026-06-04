@@ -1,0 +1,176 @@
+=== RUN   TestNewFindingShape
+--- PASS: TestNewFindingShape (0.00s)
+=== RUN   TestClassificationForScore
+--- PASS: TestClassificationForScore (0.00s)
+=== RUN   TestSeverityForScore
+--- PASS: TestSeverityForScore (0.00s)
+=== RUN   TestClampScore
+--- PASS: TestClampScore (0.00s)
+=== RUN   TestScoreWaitingReason
+--- PASS: TestScoreWaitingReason (0.00s)
+=== RUN   TestScoreEventReason
+--- PASS: TestScoreEventReason (0.00s)
+=== RUN   TestNormalizeReason
+--- PASS: TestNormalizeReason (0.00s)
+=== RUN   TestPodReady
+--- PASS: TestPodReady (0.00s)
+=== RUN   TestEventLastSeen
+--- PASS: TestEventLastSeen (0.00s)
+=== RUN   TestAppendMemSample
+--- PASS: TestAppendMemSample (0.00s)
+=== RUN   TestMemoryTrending
+--- PASS: TestMemoryTrending (0.00s)
+=== RUN   TestFmtMiB
+--- PASS: TestFmtMiB (0.00s)
+=== RUN   TestIsBuiltinGroup
+--- PASS: TestIsBuiltinGroup (0.00s)
+=== RUN   TestContains
+--- PASS: TestContains (0.00s)
+=== RUN   TestShouldScanLogs
+--- PASS: TestShouldScanLogs (0.00s)
+=== RUN   TestDeploymentFindings
+=== RUN   TestDeploymentFindings/available_replicas_below_desired
+=== RUN   TestDeploymentFindings/generation_lag
+=== RUN   TestDeploymentFindings/healthy_deployment_emits_no_findings
+--- PASS: TestDeploymentFindings (0.00s)
+    --- PASS: TestDeploymentFindings/available_replicas_below_desired (0.00s)
+    --- PASS: TestDeploymentFindings/generation_lag (0.00s)
+    --- PASS: TestDeploymentFindings/healthy_deployment_emits_no_findings (0.00s)
+=== RUN   TestCheckPodsReportsCrashLoopBackOff
+--- PASS: TestCheckPodsReportsCrashLoopBackOff (0.00s)
+=== RUN   TestCheckPodsReportsOOMKilled
+--- PASS: TestCheckPodsReportsOOMKilled (0.00s)
+=== RUN   TestCheckResourceSpecsReportsMissingRequests
+--- PASS: TestCheckResourceSpecsReportsMissingRequests (0.00s)
+=== RUN   TestCheckEventsEmitsWarningFinding
+--- PASS: TestCheckEventsEmitsWarningFinding (0.00s)
+=== RUN   TestCheckEventsSkipsEventsOutsideLookback
+--- PASS: TestCheckEventsSkipsEventsOutsideLookback (0.00s)
+=== RUN   TestCheckWorkloadsReportsStatefulSetBelowDesired
+--- PASS: TestCheckWorkloadsReportsStatefulSetBelowDesired (0.00s)
+=== RUN   TestCheckServicesReportsSelectorWithNoPods
+--- PASS: TestCheckServicesReportsSelectorWithNoPods (0.00s)
+=== RUN   TestCheckServicesSkipsSelectorWithMatchingPod
+--- PASS: TestCheckServicesSkipsSelectorWithMatchingPod (0.00s)
+=== RUN   TestCheckServicesReportsPendingLoadBalancer
+--- PASS: TestCheckServicesReportsPendingLoadBalancer (0.00s)
+=== RUN   TestCheckPVCsReportsPendingAndLostClaims
+--- PASS: TestCheckPVCsReportsPendingAndLostClaims (0.00s)
+=== RUN   TestCheckPVCsReportsTrueConditions
+--- PASS: TestCheckPVCsReportsTrueConditions (0.00s)
+=== RUN   TestCheckScalingReportsHPAConditionsAndReplicaPressure
+--- PASS: TestCheckScalingReportsHPAConditionsAndReplicaPressure (0.00s)
+=== RUN   TestCheckCustomResourcesReportsGenerationLag
+2026/06/04 21:45:10 custom resource scan namespace=ns1 scanned=1 skipped=0 errors=0 findings=1
+--- PASS: TestCheckCustomResourcesReportsGenerationLag (0.00s)
+=== RUN   TestCheckCustomResourcesReportsFalseCondition
+2026/06/04 21:45:10 custom resource scan namespace=ns1 scanned=1 skipped=0 errors=0 findings=1
+--- PASS: TestCheckCustomResourcesReportsFalseCondition (0.00s)
+=== RUN   TestCustomResourceAllowlistAndExcludelist
+--- PASS: TestCustomResourceAllowlistAndExcludelist (0.00s)
+=== RUN   TestCustomResourceDiscoveryIsCached
+--- PASS: TestCustomResourceDiscoveryIsCached (0.00s)
+=== RUN   TestCheckResourceUsageIncrementsSampleMetric
+--- PASS: TestCheckResourceUsageIncrementsSampleMetric (0.00s)
+=== RUN   TestIsSuppressed
+--- PASS: TestIsSuppressed (0.00s)
+=== RUN   TestIsSuppressedEmptyMap
+--- PASS: TestIsSuppressedEmptyMap (0.00s)
+=== RUN   TestBoolEnvDefaultOn
+--- PASS: TestBoolEnvDefaultOn (0.00s)
+=== RUN   TestLoadConfigDefaults
+--- PASS: TestLoadConfigDefaults (0.00s)
+=== RUN   TestLoadConfigCheckTimeout
+--- PASS: TestLoadConfigCheckTimeout (0.00s)
+=== RUN   TestResourceBackendDisabledDisablesUsageCheck
+--- PASS: TestResourceBackendDisabledDisablesUsageCheck (0.00s)
+=== RUN   TestLoadConfigCustomResourceControls
+--- PASS: TestLoadConfigCustomResourceControls (0.00s)
+=== RUN   TestLoadConfigCustomResourceGroupAliases
+--- PASS: TestLoadConfigCustomResourceGroupAliases (0.00s)
+=== RUN   TestLoadConfigDownstreamTriageDefaults
+--- PASS: TestLoadConfigDownstreamTriageDefaults (0.00s)
+=== RUN   TestLoadConfigDownstreamTriageExplicitEnv
+--- PASS: TestLoadConfigDownstreamTriageExplicitEnv (0.00s)
+=== RUN   TestLoadConfigDownstreamTriageDeprecatedAlias
+2026/06/04 21:45:10 WARN: AI_TRIAGE_ENABLED is deprecated and will be removed in v1.0.0; use DOWNSTREAM_TRIAGE_ENABLED instead
+2026/06/04 21:45:10 WARN: AI_MIN_SCORE is deprecated and will be removed in v1.0.0; use DOWNSTREAM_MIN_SCORE instead
+--- PASS: TestLoadConfigDownstreamTriageDeprecatedAlias (0.00s)
+=== RUN   TestLoadConfigDownstreamTriageNewOverridesDeprecated
+--- PASS: TestLoadConfigDownstreamTriageNewOverridesDeprecated (0.00s)
+=== RUN   TestReadmeDocumentsImplementedMetrics
+--- PASS: TestReadmeDocumentsImplementedMetrics (0.00s)
+=== RUN   TestReadmeDocumentsImplementedConfigVariables
+--- PASS: TestReadmeDocumentsImplementedConfigVariables (0.00s)
+=== RUN   TestMonitorPublishesNotReadyFindingWithAIDispatchAndCooldown
+2026/06/04 21:45:10 created state ConfigMap cert-manager/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=degraded score=60 ai_triage_required=true
+--- PASS: TestMonitorPublishesNotReadyFindingWithAIDispatchAndCooldown (0.00s)
+=== RUN   TestMonitorRetriesFailedFindingPublish
+2026/06/04 21:45:10 created state ConfigMap cert-manager/autonomous-monitor-state
+2026/06/04 21:45:10 ERROR: failed to publish finding 1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494: broker down
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=degraded score=60 ai_triage_required=true
+--- PASS: TestMonitorRetriesFailedFindingPublish (0.00s)
+=== RUN   TestMonitorPublishesResolvedFinding
+2026/06/04 21:45:10 created state ConfigMap cert-manager/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=degraded score=60 ai_triage_required=true
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=healthy score=0 ai_triage_required=false
+--- PASS: TestMonitorPublishesResolvedFinding (0.00s)
+=== RUN   TestMonitorRetriesFailedResolvedPublish
+2026/06/04 21:45:10 created state ConfigMap cert-manager/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=degraded score=60 ai_triage_required=true
+2026/06/04 21:45:10 ERROR: failed to publish finding 1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494: broker down
+2026/06/04 21:45:10 published finding id=1545120ff66917827a88b9ef99dfc4edce5aa06d6184f976905ad6656f569494 namespace=cert-manager kind=Pod name=cert-manager-webhook check=pod-health classification=healthy score=0 ai_triage_required=false
+--- PASS: TestMonitorRetriesFailedResolvedPublish (0.00s)
+=== RUN   TestResourceSpecsRunsWhenPodHealthDisabled
+2026/06/04 21:45:10 created state ConfigMap flux-system/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=65c5f16e2acce4e4d64ab0f50b7f924d4ab3856214f5ccb009af5e60b147a822 namespace=flux-system kind=Pod name=source-controller/manager check=resource-spec classification=suspicious score=45 ai_triage_required=false
+2026/06/04 21:45:10 published finding id=0f981e3c022c6fca739178eaa19e3a189c444e7af0f5b57e77342f866f06e257 namespace=flux-system kind=Pod name=source-controller/manager check=resource-spec classification=suspicious score=45 ai_triage_required=false
+2026/06/04 21:45:10 published finding id=bb60acd351b325d1dbfb1442a8aa3a924f567cb129c1556713702ac84778ddea namespace=flux-system kind=Pod name=source-controller/manager check=resource-spec classification=watch score=30 ai_triage_required=false
+--- PASS: TestResourceSpecsRunsWhenPodHealthDisabled (0.00s)
+=== RUN   TestConfiguredChecksAreWiredIntoPoll
+=== RUN   TestConfiguredChecksAreWiredIntoPoll/services
+2026/06/04 21:45:10 created state ConfigMap ns1/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=e10dfa05b61cc2cdc2461997d29f173aff4965b3b7753e1d91514363b7ba2e38 namespace=ns1 kind=Service name=api check=service classification=degraded score=60 ai_triage_required=true
+=== RUN   TestConfiguredChecksAreWiredIntoPoll/pvcs
+2026/06/04 21:45:10 created state ConfigMap ns1/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=523570c53de035d1188f631b3712003d51ed7577c3df5d27cd177055a2ddc086 namespace=ns1 kind=PersistentVolumeClaim name=data check=pvc classification=degraded score=60 ai_triage_required=true
+=== RUN   TestConfiguredChecksAreWiredIntoPoll/scaling
+2026/06/04 21:45:10 created state ConfigMap ns1/autonomous-monitor-state
+2026/06/04 21:45:10 published finding id=879e71ebdb50c50e0c28a640a9779bf5136ef522c87df8729861b91ab14657b6 namespace=ns1 kind=HorizontalPodAutoscaler name=web check=scaling classification=suspicious score=55 ai_triage_required=false
+--- PASS: TestConfiguredChecksAreWiredIntoPoll (0.00s)
+    --- PASS: TestConfiguredChecksAreWiredIntoPoll/services (0.00s)
+    --- PASS: TestConfiguredChecksAreWiredIntoPoll/pvcs (0.00s)
+    --- PASS: TestConfiguredChecksAreWiredIntoPoll/scaling (0.00s)
+=== RUN   TestPollTimesOutSlowCheck
+2026/06/04 21:45:10 created state ConfigMap ns1/autonomous-monitor-state
+2026/06/04 21:45:10 ERROR: check timed out namespace=ns1 check=pods timeout=10ms
+--- PASS: TestPollTimesOutSlowCheck (0.20s)
+=== RUN   TestMonitorExpiresOldResolvedFindings
+2026/06/04 21:45:11 created state ConfigMap kube-system/autonomous-monitor-state
+--- PASS: TestMonitorExpiresOldResolvedFindings (0.00s)
+=== RUN   TestMonitorPrunesStaleObservations
+--- PASS: TestMonitorPrunesStaleObservations (0.00s)
+=== RUN   TestMonitorPrunesObservationCapOldestFirst
+--- PASS: TestMonitorPrunesObservationCapOldestFirst (0.00s)
+=== RUN   TestMonitorPrunesResolvedFindingsBeforeOngoing
+--- PASS: TestMonitorPrunesResolvedFindingsBeforeOngoing (0.00s)
+=== RUN   TestMonitorRefusesOversizedStateAfterPruning
+2026/06/04 21:45:11 adopted state ConfigMap ns1/autonomous-monitor-state with 0 findings
+2026/06/04 21:45:11 ERROR: state ConfigMap payload is too large after pruning: bytes=482 max_bytes=64 findings=1 observations=0
+--- PASS: TestMonitorRefusesOversizedStateAfterPruning (0.00s)
+=== RUN   TestPublisherInterfaceContract
+--- PASS: TestPublisherInterfaceContract (0.00s)
+=== RUN   TestFindingMarshalRoundTrip
+--- PASS: TestFindingMarshalRoundTrip (0.00s)
+=== RUN   TestStateStoreCreatesMissingConfigMap
+2026/06/04 21:45:11 created state ConfigMap cert-manager/autonomous-monitor-state
+--- PASS: TestStateStoreCreatesMissingConfigMap (0.00s)
+=== RUN   TestStateStoreAdoptsExistingConfigMap
+2026/06/04 21:45:11 adopted state ConfigMap flux-system/autonomous-monitor-state with 1 findings
+--- PASS: TestStateStoreAdoptsExistingConfigMap (0.00s)
+=== RUN   TestStateStoreRetriesUpdateConflict
+2026/06/04 21:45:11 adopted state ConfigMap ns1/autonomous-monitor-state with 0 findings
+--- PASS: TestStateStoreRetriesUpdateConflict (0.00s)
+PASS
+ok  	github.com/foxj77/autonomous-monitor	1.645s
