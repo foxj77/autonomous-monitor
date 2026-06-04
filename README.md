@@ -307,7 +307,9 @@ This repo uses release-please and GitHub Actions to publish:
 
 - A release PR that bumps `version.txt` and `CHANGELOG.md`
 - A GitHub Release and `v*.*.*` tag when the release PR is merged
-- A publish workflow triggered by that GitHub Release
+- A publish workflow triggered by that GitHub Release, with a `Release Please`
+  workflow fallback for default-token releases where GitHub suppresses the
+  downstream `release` event
 
 - A multi-arch container image (`linux/amd64`, `linux/arm64`) to `ghcr.io/foxj77/autonomous-monitor`
 - The same image signed with `cosign` (keyless, OIDC)
@@ -316,6 +318,11 @@ This repo uses release-please and GitHub Actions to publish:
 - The raw binaries as an OCI artifact (using `oras`) at `ghcr.io/foxj77/autonomous-monitor:<tag>-binary`
 
 Stable releases publish image tags without the leading `v`: `1.2.3`, `1.2`, `1` for non-`v0` releases, `latest`, and `sha-<short>`. Manual workflow dispatch without a version publishes `edge` and `sha-<short>` only.
+
+For the fully automatic path, the repository Actions setting must allow
+workflows to create pull requests. A `RELEASE_PLEASE_TOKEN` secret with `repo`
+and `workflow` scopes is still recommended, matching the MCP memory server
+setup, because it lets the GitHub Release trigger downstream workflows directly.
 
 ## License
 
