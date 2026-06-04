@@ -789,6 +789,54 @@ func TestCheckCustomResourcesReportsFalseCondition(t *testing.T) {
 	}
 }
 
+func TestCustomResourceAllowlistAndExcludelist(t *testing.T) {
+	monitor := newTestMonitor(fake.NewSimpleClientset(), nil, nil, "ns1")
+	source := schema.GroupVersionResource{Group: "source.toolkit.fluxcd.io", Version: "v1", Resource: "helmrepositories"}
+	helm := schema.GroupVersionResource{Group: "helm.toolkit.fluxcd.io", Version: "v2", Resource: "helmreleases"}
+	noisy := schema.GroupVersionResource{Group: "noisy.example.com", Version: "v1", Resource: "widgets"}
+
+	monitor.cfg.CustomResourceAllowlist = []string{"source.toolkit.fluxcd.io", "helm.toolkit.fluxcd.io/v2/helmreleases", "noisy.example.com/*"}
+	monitor.cfg.CustomResourceExcludelist = []string{"noisy.example.com/widgets"}
+
+	if !monitor.customResourceAllowed(source) {
+		t.Fatal("group allowlist should allow source resources")
+	}
+	if !monitor.customResourceAllowed(helm) {
+		t.Fatal("group/version/resource allowlist should allow helmreleases")
+	}
+	if monitor.customResourceAllowed(noisy) {
+		t.Fatal("excludelist should override allowlist")
+	}
+}
+
+func TestCustomResourceDiscoveryIsCached(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: "source.toolkit.fluxcd.io/v1",
+		APIResources: []metav1.APIResource{{
+			Name:       "helmrepositories",
+			Kind:       "HelmRepository",
+			Namespaced: true,
+			Verbs:      metav1.Verbs{"list"},
+		}},
+	}}
+	monitor := newTestMonitor(client, nil, nil, "ns1")
+	monitor.cfg.CustomResourceDiscoveryTTL = time.Hour
+
+	first, err := monitor.customResourceAPILists()
+	if err != nil {
+		t.Fatalf("first discovery: %v", err)
+	}
+	client.Resources = nil
+	second, err := monitor.customResourceAPILists()
+	if err != nil {
+		t.Fatalf("cached discovery: %v", err)
+	}
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("cached discovery lengths = first %d second %d, want both 1", len(first), len(second))
+	}
+}
+
 func TestCheckResourceUsageIncrementsSampleMetric(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset(&corev1.Pod{

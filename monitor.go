@@ -14,16 +14,18 @@ import (
 )
 
 type Monitor struct {
-	cfg          Config
-	kube         kubernetes.Interface
-	metrics      metricsv1beta1client.Interface
-	dynamic      dynamic.Interface
-	publisher    Publisher
-	store        *StateStore
-	state        *MonitorState
-	suppressions map[string]struct{} // loaded from SUPPRESS_CONFIGMAP each poll
-	dirty        bool
-	lastWrite    time.Time
+	cfg                            Config
+	kube                           kubernetes.Interface
+	metrics                        metricsv1beta1client.Interface
+	dynamic                        dynamic.Interface
+	publisher                      Publisher
+	store                          *StateStore
+	state                          *MonitorState
+	suppressions                   map[string]struct{} // loaded from SUPPRESS_CONFIGMAP each poll
+	dirty                          bool
+	lastWrite                      time.Time
+	customResourceDiscovery        []*metav1.APIResourceList
+	customResourceDiscoveryExpires time.Time
 }
 
 func NewMonitor(cfg Config, kube kubernetes.Interface, metricsClient metricsv1beta1client.Interface, dynClient dynamic.Interface, publisher Publisher, store *StateStore, state *MonitorState) *Monitor {

@@ -37,6 +37,10 @@ var (
 		Name: "autonomous_monitor_resource_samples_total",
 		Help: "Resource samples collected by backend.",
 	}, []string{"namespace", "backend"})
+	customResourceScans = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_custom_resource_scans_total",
+		Help: "Custom resources scanned, skipped, or errored.",
+	}, []string{"namespace", "result"})
 	pollDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "autonomous_monitor_poll_duration_seconds",
 		Help:    "Poll duration in seconds.",
@@ -54,6 +58,7 @@ func init() {
 		stateWrites,
 		publishAttempts,
 		resourceSamples,
+		customResourceScans,
 		pollDuration,
 	)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,6 +57,12 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.CheckTimeout != 30*time.Second {
 		t.Fatalf("check timeout = %s, want 30s", cfg.CheckTimeout)
 	}
+	if cfg.CustomResourceDiscoveryTTL != 10*time.Minute {
+		t.Fatalf("custom resource discovery ttl = %s, want 10m", cfg.CustomResourceDiscoveryTTL)
+	}
+	if len(cfg.CustomResourceAllowlist) != 0 || len(cfg.CustomResourceExcludelist) != 0 {
+		t.Fatalf("custom resource lists should default empty, got allow=%v exclude=%v", cfg.CustomResourceAllowlist, cfg.CustomResourceExcludelist)
+	}
 }
 
 func TestLoadConfigCheckTimeout(t *testing.T) {
@@ -75,6 +82,38 @@ func TestResourceBackendDisabledDisablesUsageCheck(t *testing.T) {
 	cfg := LoadConfig()
 	if cfg.Checks.ResourceUsage {
 		t.Fatal("disabled resource backend should disable resource usage checks")
+	}
+}
+
+func TestLoadConfigCustomResourceControls(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CUSTOM_RESOURCE_ALLOWLIST", "source.toolkit.fluxcd.io, helm.toolkit.fluxcd.io/helmreleases ")
+	t.Setenv("CUSTOM_RESOURCE_EXCLUDELIST", " noisy.example.com/widgets ")
+	t.Setenv("CUSTOM_RESOURCE_DISCOVERY_TTL", "2m")
+
+	cfg := LoadConfig()
+	if cfg.CustomResourceDiscoveryTTL != 2*time.Minute {
+		t.Fatalf("custom resource discovery ttl = %s, want 2m", cfg.CustomResourceDiscoveryTTL)
+	}
+	if got, want := strings.Join(cfg.CustomResourceAllowlist, ","), "source.toolkit.fluxcd.io,helm.toolkit.fluxcd.io/helmreleases"; got != want {
+		t.Fatalf("allowlist = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(cfg.CustomResourceExcludelist, ","), "noisy.example.com/widgets"; got != want {
+		t.Fatalf("excludelist = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfigCustomResourceGroupAliases(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CUSTOM_RESOURCE_GROUPS", "source.toolkit.fluxcd.io")
+	t.Setenv("CUSTOM_RESOURCE_EXCLUDE_GROUPS", "events.k8s.io")
+
+	cfg := LoadConfig()
+	if got, want := strings.Join(cfg.CustomResourceAllowlist, ","), "source.toolkit.fluxcd.io"; got != want {
+		t.Fatalf("allowlist alias = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(cfg.CustomResourceExcludelist, ","), "events.k8s.io"; got != want {
+		t.Fatalf("excludelist alias = %q, want %q", got, want)
 	}
 }
 
@@ -113,6 +152,11 @@ func clearConfigEnv(t *testing.T) {
 		"CHECK_CUSTOM_RESOURCES_ENABLED",
 		"CHECK_SERVICES_ENABLED",
 		"CHECK_PVCS_ENABLED",
+		"CUSTOM_RESOURCE_ALLOWLIST",
+		"CUSTOM_RESOURCE_GROUPS",
+		"CUSTOM_RESOURCE_EXCLUDELIST",
+		"CUSTOM_RESOURCE_EXCLUDE_GROUPS",
+		"CUSTOM_RESOURCE_DISCOVERY_TTL",
 	} {
 		t.Setenv(key, "")
 	}

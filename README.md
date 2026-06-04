@@ -164,6 +164,11 @@ All configuration is environment-driven.
 | `RESTART_WARNING_COUNT` | `3` | Restart-count delta within window that triggers a finding |
 | `RESTART_WINDOW` | `10m` | Window for the restart-rate detector |
 | `EVENT_LOOKBACK` | `30m` | How far back to consider warning events |
+| `CUSTOM_RESOURCE_ALLOWLIST` | _(unset)_ | Comma-separated custom resource groups or `group/resource` patterns to scan |
+| `CUSTOM_RESOURCE_EXCLUDELIST` | _(unset)_ | Comma-separated custom resource groups or `group/resource` patterns to skip |
+| `CUSTOM_RESOURCE_GROUPS` | _(unset)_ | Alias for `CUSTOM_RESOURCE_ALLOWLIST` |
+| `CUSTOM_RESOURCE_EXCLUDE_GROUPS` | _(unset)_ | Alias for `CUSTOM_RESOURCE_EXCLUDELIST` |
+| `CUSTOM_RESOURCE_DISCOVERY_TTL` | `10m` | How long to cache API discovery results for custom resource scanning |
 | `CHECK_PODS_ENABLED` | `true` | Toggle individual check families |
 | `CHECK_EVENTS_ENABLED` | `true` | |
 | `CHECK_LOGS_ENABLED` | `true` | |
@@ -217,6 +222,7 @@ Resolution events (status: `resolved`) are emitted when a previously-ongoing fin
 `autonomous_monitor_state_writes_total{namespace,result}`
 `autonomous_monitor_publish_attempts_total{namespace,result}`
 `autonomous_monitor_resource_samples_total{namespace,backend}`
+`autonomous_monitor_custom_resource_scans_total{namespace,result}`
 `autonomous_monitor_poll_duration_seconds{namespace}`
 
 All metrics are exposed on `METRICS_PORT/metrics`.

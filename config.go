@@ -21,29 +21,32 @@ type CheckConfig struct {
 }
 
 type Config struct {
-	Namespace                string
-	PollInterval             time.Duration
-	MetricsPort              string
-	RedpandaBroker           string
-	FindingsTopic            string
-	PublishTimeout           time.Duration
-	CheckTimeout             time.Duration
-	StateConfigMapName       string
-	StateWriteInterval       time.Duration
-	ResolvedFindingRetention time.Duration
-	AITriageEnabled          bool
-	AIMinScore               int
-	AICooldown               time.Duration
-	AICooldownIncident       time.Duration
-	LogScanLines             int
-	ResourceUsageBackend     string
-	MemoryWarningPercent     int
-	MemoryCriticalPercent    int
-	RestartWarningCount      int32
-	RestartWindow            time.Duration
-	EventLookback            time.Duration
-	SuppressConfigMapName    string
-	Checks                   CheckConfig
+	Namespace                  string
+	PollInterval               time.Duration
+	MetricsPort                string
+	RedpandaBroker             string
+	FindingsTopic              string
+	PublishTimeout             time.Duration
+	CheckTimeout               time.Duration
+	StateConfigMapName         string
+	StateWriteInterval         time.Duration
+	ResolvedFindingRetention   time.Duration
+	AITriageEnabled            bool
+	AIMinScore                 int
+	AICooldown                 time.Duration
+	AICooldownIncident         time.Duration
+	LogScanLines               int
+	ResourceUsageBackend       string
+	MemoryWarningPercent       int
+	MemoryCriticalPercent      int
+	RestartWarningCount        int32
+	RestartWindow              time.Duration
+	EventLookback              time.Duration
+	SuppressConfigMapName      string
+	CustomResourceAllowlist    []string
+	CustomResourceExcludelist  []string
+	CustomResourceDiscoveryTTL time.Duration
+	Checks                     CheckConfig
 }
 
 func LoadConfig() Config {
@@ -54,28 +57,31 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		Namespace:                namespace(),
-		PollInterval:             durationEnv("POLL_INTERVAL", 60*time.Second),
-		MetricsPort:              env("METRICS_PORT", "8080"),
-		RedpandaBroker:           env("REDPANDA_BROKER", "localhost:9092"),
-		FindingsTopic:            env("FINDINGS_TOPIC", "k8s.namespace.findings"),
-		PublishTimeout:           durationEnv("PUBLISH_TIMEOUT", 10*time.Second),
-		CheckTimeout:             durationEnv("CHECK_TIMEOUT", 30*time.Second),
-		StateConfigMapName:       env("STATE_CONFIGMAP_NAME", "autonomous-monitor-state"),
-		StateWriteInterval:       durationEnv("STATE_WRITE_INTERVAL", 60*time.Second),
-		ResolvedFindingRetention: durationEnv("RESOLVED_FINDING_RETENTION", 24*time.Hour),
-		AITriageEnabled:          boolEnvDefaultOn("AI_TRIAGE_ENABLED"),
-		AIMinScore:               intEnv("AI_MIN_SCORE", 60),
-		AICooldown:               durationEnv("AI_COOLDOWN", 30*time.Minute),
-		AICooldownIncident:       durationEnv("AI_COOLDOWN_INCIDENT", 10*time.Minute),
-		SuppressConfigMapName:    env("SUPPRESS_CONFIGMAP", ""),
-		LogScanLines:             intEnv("LOG_SCAN_LINES", 100),
-		ResourceUsageBackend:     resourceBackend,
-		MemoryWarningPercent:     intEnv("MEMORY_WARNING_PERCENT", 80),
-		MemoryCriticalPercent:    intEnv("MEMORY_CRITICAL_PERCENT", 90),
-		RestartWarningCount:      clampInt32(intEnv("RESTART_WARNING_COUNT", 3), 1, 1000),
-		RestartWindow:            durationEnv("RESTART_WINDOW", 10*time.Minute),
-		EventLookback:            durationEnv("EVENT_LOOKBACK", 30*time.Minute),
+		Namespace:                  namespace(),
+		PollInterval:               durationEnv("POLL_INTERVAL", 60*time.Second),
+		MetricsPort:                env("METRICS_PORT", "8080"),
+		RedpandaBroker:             env("REDPANDA_BROKER", "localhost:9092"),
+		FindingsTopic:              env("FINDINGS_TOPIC", "k8s.namespace.findings"),
+		PublishTimeout:             durationEnv("PUBLISH_TIMEOUT", 10*time.Second),
+		CheckTimeout:               durationEnv("CHECK_TIMEOUT", 30*time.Second),
+		StateConfigMapName:         env("STATE_CONFIGMAP_NAME", "autonomous-monitor-state"),
+		StateWriteInterval:         durationEnv("STATE_WRITE_INTERVAL", 60*time.Second),
+		ResolvedFindingRetention:   durationEnv("RESOLVED_FINDING_RETENTION", 24*time.Hour),
+		AITriageEnabled:            boolEnvDefaultOn("AI_TRIAGE_ENABLED"),
+		AIMinScore:                 intEnv("AI_MIN_SCORE", 60),
+		AICooldown:                 durationEnv("AI_COOLDOWN", 30*time.Minute),
+		AICooldownIncident:         durationEnv("AI_COOLDOWN_INCIDENT", 10*time.Minute),
+		SuppressConfigMapName:      env("SUPPRESS_CONFIGMAP", ""),
+		LogScanLines:               intEnv("LOG_SCAN_LINES", 100),
+		ResourceUsageBackend:       resourceBackend,
+		MemoryWarningPercent:       intEnv("MEMORY_WARNING_PERCENT", 80),
+		MemoryCriticalPercent:      intEnv("MEMORY_CRITICAL_PERCENT", 90),
+		RestartWarningCount:        clampInt32(intEnv("RESTART_WARNING_COUNT", 3), 1, 1000),
+		RestartWindow:              durationEnv("RESTART_WINDOW", 10*time.Minute),
+		EventLookback:              durationEnv("EVENT_LOOKBACK", 30*time.Minute),
+		CustomResourceAllowlist:    listEnv("CUSTOM_RESOURCE_ALLOWLIST", "CUSTOM_RESOURCE_GROUPS"),
+		CustomResourceExcludelist:  listEnv("CUSTOM_RESOURCE_EXCLUDELIST", "CUSTOM_RESOURCE_EXCLUDE_GROUPS"),
+		CustomResourceDiscoveryTTL: durationEnv("CUSTOM_RESOURCE_DISCOVERY_TTL", 10*time.Minute),
 		Checks: CheckConfig{
 			Pods:           boolEnvDefaultOn("CHECK_PODS_ENABLED"),
 			Events:         boolEnvDefaultOn("CHECK_EVENTS_ENABLED"),
@@ -136,6 +142,23 @@ func durationEnv(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func listEnv(keys ...string) []string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			parts := strings.Split(v, ",")
+			out := make([]string, 0, len(parts))
+			for _, part := range parts {
+				item := strings.ToLower(strings.TrimSpace(part))
+				if item != "" {
+					out = append(out, item)
+				}
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 func clampInt32(v, lo, hi int) int32 {
