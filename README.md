@@ -160,7 +160,6 @@ All configuration is environment-driven.
 | `RESOURCE_USAGE_BACKEND` | `metrics-server` | `metrics-server` or `disabled` |
 | `MEMORY_WARNING_PERCENT` | `80` | Memory % of limit that triggers a `memory-high` finding |
 | `MEMORY_CRITICAL_PERCENT` | `90` | Memory % of limit that triggers a `memory-critical` finding |
-| `CPU_WARNING_PERCENT` | `80` | _(reserved for future CPU check)_ |
 | `RESTART_WARNING_COUNT` | `3` | Restart-count delta within window that triggers a finding |
 | `RESTART_WINDOW` | `10m` | Window for the restart-rate detector |
 | `EVENT_LOOKBACK` | `30m` | How far back to consider warning events |
