@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,6 +111,7 @@ func (m *Monitor) Poll(ctx context.Context) {
 	}
 
 	m.expireResolvedFindings(now)
+	m.pruneState(now)
 	m.updateActiveMetrics(active)
 	m.maybeSave(ctx, now)
 	pollDuration.WithLabelValues(m.cfg.Namespace).Observe(time.Since(start).Seconds())
@@ -286,6 +289,177 @@ func (m *Monitor) expireResolvedFindings(now time.Time) {
 	}
 }
 
+func (m *Monitor) pruneState(now time.Time) {
+	m.pruneStaleObservations(now)
+	m.pruneObservationCap()
+	m.pruneFindingCap()
+	m.updateStateMetrics()
+}
+
+func (m *Monitor) pruneStaleObservations(now time.Time) {
+	if m.cfg.ObservationRetention <= 0 {
+		return
+	}
+	for key, obs := range m.state.Observations {
+		if obs == nil || obs.LastSeen.IsZero() {
+			continue
+		}
+		if now.Sub(obs.LastSeen) <= m.cfg.ObservationRetention {
+			continue
+		}
+		delete(m.state.Observations, key)
+		statePrunes.WithLabelValues(m.cfg.Namespace, "observation", "retention").Inc()
+		m.dirty = true
+	}
+}
+
+func (m *Monitor) pruneObservationCap() {
+	if m.cfg.MaxObservations <= 0 || len(m.state.Observations) <= m.cfg.MaxObservations {
+		return
+	}
+	items := make([]stateObservationItem, 0, len(m.state.Observations))
+	for key, obs := range m.state.Observations {
+		var lastSeen time.Time
+		if obs != nil {
+			lastSeen = obs.LastSeen
+		}
+		items = append(items, stateObservationItem{key: key, lastSeen: lastSeen})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].lastSeen.Before(items[j].lastSeen)
+	})
+	toDelete := len(m.state.Observations) - m.cfg.MaxObservations
+	for i := 0; i < toDelete; i++ {
+		delete(m.state.Observations, items[i].key)
+		statePrunes.WithLabelValues(m.cfg.Namespace, "observation", "cap").Inc()
+	}
+	m.dirty = true
+}
+
+func (m *Monitor) pruneFindingCap() {
+	if m.cfg.MaxFindings <= 0 || len(m.state.Findings) <= m.cfg.MaxFindings {
+		return
+	}
+	pruned := m.pruneFindingsByStatus("resolved", len(m.state.Findings)-m.cfg.MaxFindings, "cap-resolved")
+	if len(m.state.Findings) <= m.cfg.MaxFindings {
+		if pruned > 0 {
+			m.dirty = true
+		}
+		return
+	}
+	m.pruneFindingsByStatus("", len(m.state.Findings)-m.cfg.MaxFindings, "cap")
+	m.dirty = true
+}
+
+func (m *Monitor) pruneFindingsByStatus(status string, count int, reason string) int {
+	if count <= 0 {
+		return 0
+	}
+	items := make([]stateFindingItem, 0, len(m.state.Findings))
+	for id, finding := range m.state.Findings {
+		if finding == nil {
+			items = append(items, stateFindingItem{id: id})
+			continue
+		}
+		if status != "" && finding.Status != status {
+			continue
+		}
+		items = append(items, stateFindingItem{id: id, lastSeen: finding.LastSeen})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].lastSeen.Before(items[j].lastSeen)
+	})
+	if count > len(items) {
+		count = len(items)
+	}
+	for i := 0; i < count; i++ {
+		delete(m.state.Findings, items[i].id)
+		statePrunes.WithLabelValues(m.cfg.Namespace, "finding", reason).Inc()
+	}
+	return count
+}
+
+func (m *Monitor) pruneForStateSize(maxBytes int) (int, error) {
+	if maxBytes <= 0 {
+		return m.currentStateBytes()
+	}
+	size, err := m.currentStateBytes()
+	if err != nil {
+		return 0, err
+	}
+	if size <= maxBytes {
+		return size, nil
+	}
+
+	for len(m.state.Observations) > 0 && size > maxBytes {
+		m.pruneOldestObservation("size")
+		size, err = m.currentStateBytes()
+		if err != nil {
+			return 0, err
+		}
+	}
+	for size > maxBytes {
+		pruned := m.pruneFindingsByStatus("resolved", 1, "size")
+		if pruned == 0 {
+			break
+		}
+		m.dirty = true
+		size, err = m.currentStateBytes()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return size, nil
+}
+
+func (m *Monitor) pruneOldestObservation(reason string) {
+	var oldestKey string
+	var oldestTime time.Time
+	for key, obs := range m.state.Observations {
+		var lastSeen time.Time
+		if obs != nil {
+			lastSeen = obs.LastSeen
+		}
+		if oldestKey == "" || lastSeen.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = lastSeen
+		}
+	}
+	if oldestKey == "" {
+		return
+	}
+	delete(m.state.Observations, oldestKey)
+	statePrunes.WithLabelValues(m.cfg.Namespace, "observation", reason).Inc()
+	m.dirty = true
+}
+
+func (m *Monitor) currentStateBytes() (int, error) {
+	data, err := json.Marshal(m.state)
+	if err != nil {
+		return 0, err
+	}
+	return len(data), nil
+}
+
+func (m *Monitor) updateStateMetrics() {
+	size, err := m.currentStateBytes()
+	if err == nil {
+		stateBytes.WithLabelValues(m.cfg.Namespace).Set(float64(size))
+	}
+	stateFindings.WithLabelValues(m.cfg.Namespace).Set(float64(len(m.state.Findings)))
+	stateObservations.WithLabelValues(m.cfg.Namespace).Set(float64(len(m.state.Observations)))
+}
+
+type stateObservationItem struct {
+	key      string
+	lastSeen time.Time
+}
+
+type stateFindingItem struct {
+	id       string
+	lastSeen time.Time
+}
+
 func (m *Monitor) publish(ctx context.Context, finding Finding) error {
 	if err := m.publisher.PublishFinding(ctx, finding); err != nil {
 		publishAttempts.WithLabelValues(m.cfg.Namespace, "error").Inc()
@@ -303,6 +477,19 @@ func (m *Monitor) maybeSave(ctx context.Context, now time.Time) {
 	if !m.dirty || (!m.lastWrite.IsZero() && now.Sub(m.lastWrite) < m.cfg.StateWriteInterval) {
 		return
 	}
+	size, err := m.pruneForStateSize(m.cfg.MaxStateBytes)
+	if err != nil {
+		stateWrites.WithLabelValues(m.cfg.Namespace, "error").Inc()
+		log.Printf("ERROR: failed to measure state before write: %v", err)
+		return
+	}
+	if m.cfg.MaxStateBytes > 0 && size > m.cfg.MaxStateBytes {
+		stateWrites.WithLabelValues(m.cfg.Namespace, "too-large").Inc()
+		log.Printf("ERROR: state ConfigMap payload is too large after pruning: bytes=%d max_bytes=%d findings=%d observations=%d",
+			size, m.cfg.MaxStateBytes, len(m.state.Findings), len(m.state.Observations))
+		return
+	}
+	stateBytes.WithLabelValues(m.cfg.Namespace).Set(float64(size))
 	if err := m.store.Save(ctx, m.state); err != nil {
 		stateWrites.WithLabelValues(m.cfg.Namespace, "error").Inc()
 		log.Printf("ERROR: failed to write state ConfigMap: %v", err)

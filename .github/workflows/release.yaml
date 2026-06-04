@@ -1,17 +1,17 @@
 name: release
 
-# Triggered by:
-#   - any push to main (rolling release, tagged with short SHA)
-#   - any tag matching v*.*.* (stable semver release)
+# Triggered when release-please publishes a GitHub Release. Builds and pushes
+# SemVer-tagged images and release artifacts. Manual dispatch can publish a
+# supplied SemVer version, or an edge/sha-only build when version is blank.
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to release (e.g. v0.1.0). Leave empty to use the current short SHA."
+      version:
+        description: "SemVer to publish (e.g. 0.2.0). Leave blank for an edge/sha-only build."
         required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,36 +31,38 @@ jobs:
     outputs:
       is_stable: ${{ steps.meta.outputs.is_stable }}
       tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
       binary_tag: ${{ steps.meta.outputs.binary_tag }}
       ref_name: ${{ steps.meta.outputs.ref_name }}
-      major_minor: ${{ steps.meta.outputs.major_minor }}
     steps:
       - id: meta
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
-            tag="${{ inputs.tag }}"
-          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+          if [[ "${{ github.event_name }}" == "release" ]]; then
             tag="${{ github.ref_name }}"
+            version="${tag#v}"
+            is_stable="true"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            version="${{ inputs.version }}"
+            version="${version#v}"
+            tag="v${version}"
+            is_stable="true"
           else
             short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
-            tag="nightly-${short_sha}"
+            tag="edge-${short_sha}"
+            version=""
+            is_stable="false"
           fi
 
-          if [[ "$tag" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
-            is_stable="true"
-            major_minor="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-          else
-            is_stable="false"
-            major_minor=""
+          if [[ "$is_stable" == "true" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable releases must use SemVer tags like v0.2.0; got ${tag}" >&2
+            exit 1
           fi
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "binary_tag=${tag}-binary" >> "$GITHUB_OUTPUT"
           echo "is_stable=${is_stable}" >> "$GITHUB_OUTPUT"
           echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
-          echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
 
   binaries:
     name: Build binaries
@@ -147,15 +149,23 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=sha,format=short,prefix=sha-
-            type=raw,value=${{ needs.resolve-metadata.outputs.tag }}
-            type=match,pattern=v(.*),group=1
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            type=raw,value=${{ needs.resolve-metadata.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && needs.resolve-metadata.outputs.version != '' }}
             type=raw,value=latest,enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' }}
+            type=raw,value=edge,enable=${{ needs.resolve-metadata.outputs.is_stable != 'true' }}
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=autonomous-monitor
+            org.opencontainers.image.description=Deterministic Kubernetes namespace monitor that publishes JSON findings
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -281,6 +291,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-metadata.outputs.tag }}
+          VERSION: ${{ needs.resolve-metadata.outputs.version }}
           BINARY_TAG: ${{ needs.resolve-metadata.outputs.binary_tag }}
         run: |
           if [[ "${{ needs.resolve-metadata.outputs.is_stable }}" == "true" ]]; then
@@ -291,7 +302,7 @@ jobs:
 
           Pull the image:
           \`\`\`
-          docker pull ghcr.io/${{ github.repository }}:${TAG}
+          docker pull ghcr.io/${{ github.repository }}:${VERSION}
           \`\`\`
 
           Pull the raw binaries as an OCI artifact (requires \`oras\`):
@@ -301,7 +312,7 @@ jobs:
 
           Verify with cosign:
           \`\`\`
-          cosign verify ghcr.io/${{ github.repository }}:${TAG} --certificate-identity-regexp '.*' --certificate-oidc-issuer '.*'
+          cosign verify ghcr.io/${{ github.repository }}:${VERSION} --certificate-identity-regexp '.*' --certificate-oidc-issuer '.*'
           \`\`\`
           EOF
               notes=$(cat notes.md)

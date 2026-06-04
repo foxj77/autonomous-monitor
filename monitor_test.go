@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,6 +360,121 @@ func TestMonitorExpiresOldResolvedFindings(t *testing.T) {
 	}
 }
 
+func TestMonitorPrunesStaleObservations(t *testing.T) {
+	now := time.Now().UTC()
+	monitor := &Monitor{
+		cfg: testConfig("ns1"),
+		state: &MonitorState{
+			Version:   1,
+			Namespace: "ns1",
+			Findings:  map[string]*FindingState{},
+			Observations: map[string]*Observation{
+				"old":    {LastSeen: now.Add(-25 * time.Hour), RestartCount: 1},
+				"recent": {LastSeen: now.Add(-time.Hour), RestartCount: 2},
+			},
+		},
+	}
+	monitor.cfg.ObservationRetention = 24 * time.Hour
+
+	monitor.pruneState(now)
+
+	if _, ok := monitor.state.Observations["old"]; ok {
+		t.Fatal("old observation should be pruned")
+	}
+	if _, ok := monitor.state.Observations["recent"]; !ok {
+		t.Fatal("recent observation should remain")
+	}
+}
+
+func TestMonitorPrunesObservationCapOldestFirst(t *testing.T) {
+	now := time.Now().UTC()
+	monitor := &Monitor{
+		cfg: testConfig("ns1"),
+		state: &MonitorState{
+			Version:   1,
+			Namespace: "ns1",
+			Findings:  map[string]*FindingState{},
+			Observations: map[string]*Observation{
+				"oldest": {LastSeen: now.Add(-3 * time.Hour)},
+				"middle": {LastSeen: now.Add(-2 * time.Hour)},
+				"newest": {LastSeen: now.Add(-time.Hour)},
+			},
+		},
+	}
+	monitor.cfg.MaxObservations = 2
+
+	monitor.pruneState(now)
+
+	if _, ok := monitor.state.Observations["oldest"]; ok {
+		t.Fatal("oldest observation should be pruned")
+	}
+	if len(monitor.state.Observations) != 2 {
+		t.Fatalf("observations = %d, want 2", len(monitor.state.Observations))
+	}
+}
+
+func TestMonitorPrunesResolvedFindingsBeforeOngoing(t *testing.T) {
+	now := time.Now().UTC()
+	monitor := &Monitor{
+		cfg: testConfig("ns1"),
+		state: &MonitorState{
+			Version:      1,
+			Namespace:    "ns1",
+			Observations: map[string]*Observation{},
+			Findings: map[string]*FindingState{
+				"old-resolved": {Status: "resolved", LastSeen: now.Add(-3 * time.Hour)},
+				"new-resolved": {Status: "resolved", LastSeen: now.Add(-time.Hour)},
+				"ongoing":      {Status: "ongoing", LastSeen: now.Add(-2 * time.Hour)},
+			},
+		},
+	}
+	monitor.cfg.MaxFindings = 2
+
+	monitor.pruneState(now)
+
+	if _, ok := monitor.state.Findings["old-resolved"]; ok {
+		t.Fatal("oldest resolved finding should be pruned first")
+	}
+	if _, ok := monitor.state.Findings["ongoing"]; !ok {
+		t.Fatal("ongoing finding should remain while resolved findings can be pruned")
+	}
+}
+
+func TestMonitorRefusesOversizedStateAfterPruning(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "autonomous-monitor-state", Namespace: "ns1"},
+		Data:       map[string]string{stateDataKey: `{"version":1,"namespace":"ns1","findings":{},"observations":{}}`},
+	})
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	now := time.Now().UTC()
+	state.Findings["ongoing"] = &FindingState{
+		Kind:           "Pod",
+		Name:           strings.Repeat("x", 200),
+		Check:          "pod-health",
+		Reason:         "not-ready",
+		Status:         "ongoing",
+		LastSeen:       now,
+		FirstSeen:      now,
+		Score:          60,
+		Classification: "degraded",
+	}
+	cfg := testConfig("ns1")
+	cfg.MaxStateBytes = 64
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+	monitor.dirty = true
+
+	monitor.maybeSave(ctx, now)
+
+	if !monitor.lastWrite.IsZero() {
+		t.Fatal("oversized state should not be written")
+	}
+}
+
 func testConfig(namespace string) Config {
 	return Config{
 		Namespace:                namespace,
@@ -366,6 +482,10 @@ func testConfig(namespace string) Config {
 		StateConfigMapName:       "autonomous-monitor-state",
 		StateWriteInterval:       time.Hour,
 		ResolvedFindingRetention: 24 * time.Hour,
+		ObservationRetention:     24 * time.Hour,
+		MaxObservations:          5000,
+		MaxFindings:              2000,
+		MaxStateBytes:            900 * 1024,
 		AITriageEnabled:          true,
 		AIMinScore:               60,
 		AICooldown:               30 * time.Minute,

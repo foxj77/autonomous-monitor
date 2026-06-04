@@ -14,6 +14,7 @@ import (
 )
 
 const stateDataKey = "state.json"
+const stateSaveConflictRetries = 3
 
 type MonitorState struct {
 	Version      int                      `json:"version"`
@@ -111,31 +112,39 @@ func (s *StateStore) Save(ctx context.Context, state *MonitorState) error {
 	if !s.writeable {
 		return fmt.Errorf("state ConfigMap %s/%s is not writeable", s.namespace, s.name)
 	}
-	if s.configMap == nil {
-		cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		s.configMap = cm
-	}
-
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	cm := s.configMap.DeepCopy()
-	if cm.Data == nil {
-		cm.Data = map[string]string{}
-	}
-	cm.Data[stateDataKey] = string(data)
+	var lastErr error
+	for attempt := 0; attempt < stateSaveConflictRetries; attempt++ {
+		if s.configMap == nil || attempt > 0 {
+			cm, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			s.configMap = cm
+		}
 
-	updated, err := s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
-	if err != nil {
-		return err
+		cm := s.configMap.DeepCopy()
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[stateDataKey] = string(data)
+
+		updated, err := s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		if err == nil {
+			s.configMap = updated
+			return nil
+		}
+		lastErr = err
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+		s.configMap = nil
 	}
-	s.configMap = updated
-	return nil
+	return fmt.Errorf("state ConfigMap %s/%s update conflicted after %d attempts: %w", s.namespace, s.name, stateSaveConflictRetries, lastErr)
 }
 
 func (s *StateStore) create(ctx context.Context, state *MonitorState) (*corev1.ConfigMap, error) {
