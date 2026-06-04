@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestStateStoreCreatesMissingConfigMap(t *testing.T) {
@@ -51,5 +56,35 @@ func TestStateStoreAdoptsExistingConfigMap(t *testing.T) {
 	}
 	if state.Findings["abc"].Name != "source-controller" {
 		t.Fatalf("adopted finding name = %q", state.Findings["abc"].Name)
+	}
+}
+
+func TestStateStoreRetriesUpdateConflict(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "autonomous-monitor-state", Namespace: "ns1"},
+		Data:       map[string]string{stateDataKey: `{"version":1,"namespace":"ns1","findings":{},"observations":{}}`},
+	})
+	conflicts := 0
+	client.PrependReactor("update", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		if conflicts == 0 {
+			conflicts++
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, "autonomous-monitor-state", nil)
+		}
+		return false, nil, nil
+	})
+
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	state.Observations["pod/api/restarts"] = &Observation{LastSeen: time.Now().UTC(), RestartCount: 1}
+
+	if err := store.Save(ctx, state); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if conflicts != 1 {
+		t.Fatalf("conflicts = %d, want 1", conflicts)
 	}
 }

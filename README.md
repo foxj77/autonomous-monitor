@@ -154,6 +154,10 @@ All configuration is environment-driven.
 | `STATE_CONFIGMAP_NAME` | `autonomous-monitor-state` | Per-namespace state CM |
 | `STATE_WRITE_INTERVAL` | `60s` | Throttle for state CM writes |
 | `RESOLVED_FINDING_RETENTION` | `24h` | Drop resolved findings from state after this |
+| `OBSERVATION_RETENTION` | `24h` | Drop stale restart/memory observations after this |
+| `MAX_OBSERVATIONS` | `5000` | Hard cap for observation entries kept in state |
+| `MAX_FINDINGS` | `2000` | Hard cap for finding entries kept in state |
+| `MAX_STATE_BYTES` | `921600` | Maximum serialized state size before a write is refused |
 | `AI_TRIAGE_ENABLED` | `true` | Mark findings for AI dispatch |
 | `AI_MIN_SCORE` | `60` | Findings at or above this score are flagged |
 | `AI_COOLDOWN` | `30m` | Per-finding cooldown between AI dispatches |
@@ -222,6 +226,10 @@ Resolution events (status: `resolved`) are emitted when a previously-ongoing fin
 `autonomous_monitor_ai_dispatch_requests_total{namespace,result}`
 `autonomous_monitor_ai_cooldowns_total{namespace}`
 `autonomous_monitor_state_writes_total{namespace,result}`
+`autonomous_monitor_state_bytes{namespace}`
+`autonomous_monitor_state_findings{namespace}`
+`autonomous_monitor_state_observations{namespace}`
+`autonomous_monitor_state_prunes_total{namespace,type,reason}`
 `autonomous_monitor_publish_attempts_total{namespace,result}`
 `autonomous_monitor_resource_samples_total{namespace,backend}`
 `autonomous_monitor_custom_resource_scans_total{namespace,result}`
@@ -246,7 +254,11 @@ A reference build environment is in the `Dockerfile` (`golang:1.23-alpine` with 
 
 ## Releasing
 
-This repo uses GitHub Actions to publish:
+This repo uses release-please and GitHub Actions to publish:
+
+- A release PR that bumps `version.txt` and `CHANGELOG.md`
+- A GitHub Release and `v*.*.*` tag when the release PR is merged
+- A publish workflow triggered by that GitHub Release
 
 - A multi-arch container image (`linux/amd64`, `linux/arm64`) to `ghcr.io/foxj77/autonomous-monitor`
 - The same image signed with `cosign` (keyless, OIDC)
@@ -254,7 +266,7 @@ This repo uses GitHub Actions to publish:
 - A GitHub Release with the raw binaries (linux/amd64, linux/arm64) attached
 - The raw binaries as an OCI artifact (using `oras`) at `ghcr.io/foxj77/autonomous-monitor:<tag>-binary`
 
-Every push to `main` produces `:main`, `:sha-<short>`, and `:nightly-<short>` image tags. Every tag matching `v*.*.*` produces a stable release.
+Stable releases publish image tags without the leading `v`: `1.2.3`, `1.2`, `1` for non-`v0` releases, `latest`, and `sha-<short>`. Manual workflow dispatch without a version publishes `edge` and `sha-<short>` only.
 
 ## License
 

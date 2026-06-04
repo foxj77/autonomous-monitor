@@ -31,6 +31,10 @@ type Config struct {
 	StateConfigMapName         string
 	StateWriteInterval         time.Duration
 	ResolvedFindingRetention   time.Duration
+	ObservationRetention       time.Duration
+	MaxObservations            int
+	MaxFindings                int
+	MaxStateBytes              int
 	AITriageEnabled            bool
 	AIMinScore                 int
 	AICooldown                 time.Duration
@@ -67,6 +71,10 @@ func LoadConfig() Config {
 		StateConfigMapName:         env("STATE_CONFIGMAP_NAME", "autonomous-monitor-state"),
 		StateWriteInterval:         durationEnv("STATE_WRITE_INTERVAL", 60*time.Second),
 		ResolvedFindingRetention:   durationEnv("RESOLVED_FINDING_RETENTION", 24*time.Hour),
+		ObservationRetention:       durationEnv("OBSERVATION_RETENTION", 24*time.Hour),
+		MaxObservations:            intEnv("MAX_OBSERVATIONS", 5000),
+		MaxFindings:                intEnv("MAX_FINDINGS", 2000),
+		MaxStateBytes:              intEnv("MAX_STATE_BYTES", 900*1024),
 		AITriageEnabled:            boolEnvDefaultOn("AI_TRIAGE_ENABLED"),
 		AIMinScore:                 intEnv("AI_MIN_SCORE", 60),
 		AICooldown:                 durationEnv("AI_COOLDOWN", 30*time.Minute),

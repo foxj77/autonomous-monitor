@@ -60,6 +60,18 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.CustomResourceDiscoveryTTL != 10*time.Minute {
 		t.Fatalf("custom resource discovery ttl = %s, want 10m", cfg.CustomResourceDiscoveryTTL)
 	}
+	if cfg.ObservationRetention != 24*time.Hour {
+		t.Fatalf("observation retention = %s, want 24h", cfg.ObservationRetention)
+	}
+	if cfg.MaxObservations != 5000 {
+		t.Fatalf("max observations = %d, want 5000", cfg.MaxObservations)
+	}
+	if cfg.MaxFindings != 2000 {
+		t.Fatalf("max findings = %d, want 2000", cfg.MaxFindings)
+	}
+	if cfg.MaxStateBytes != 900*1024 {
+		t.Fatalf("max state bytes = %d, want %d", cfg.MaxStateBytes, 900*1024)
+	}
 	if len(cfg.CustomResourceAllowlist) != 0 || len(cfg.CustomResourceExcludelist) != 0 {
 		t.Fatalf("custom resource lists should default empty, got allow=%v exclude=%v", cfg.CustomResourceAllowlist, cfg.CustomResourceExcludelist)
 	}
@@ -135,6 +147,10 @@ func clearConfigEnv(t *testing.T) {
 		"STATE_CONFIGMAP_NAME",
 		"STATE_WRITE_INTERVAL",
 		"RESOLVED_FINDING_RETENTION",
+		"OBSERVATION_RETENTION",
+		"MAX_OBSERVATIONS",
+		"MAX_FINDINGS",
+		"MAX_STATE_BYTES",
 		"AI_TRIAGE_ENABLED",
 		"AI_MIN_SCORE",
 		"AI_COOLDOWN",

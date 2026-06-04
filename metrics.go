@@ -29,6 +29,22 @@ var (
 		Name: "autonomous_monitor_state_writes_total",
 		Help: "ConfigMap state writes by result.",
 	}, []string{"namespace", "result"})
+	stateBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "autonomous_monitor_state_bytes",
+		Help: "Serialized monitor state size in bytes.",
+	}, []string{"namespace"})
+	stateFindings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "autonomous_monitor_state_findings",
+		Help: "Findings currently held in monitor state.",
+	}, []string{"namespace"})
+	stateObservations = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "autonomous_monitor_state_observations",
+		Help: "Observations currently held in monitor state.",
+	}, []string{"namespace"})
+	statePrunes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "autonomous_monitor_state_prunes_total",
+		Help: "State entries pruned by type and reason.",
+	}, []string{"namespace", "type", "reason"})
 	publishAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "autonomous_monitor_publish_attempts_total",
 		Help: "Finding publish attempts by result.",
@@ -56,6 +72,10 @@ func init() {
 		aiDispatchRequests,
 		aiCooldowns,
 		stateWrites,
+		stateBytes,
+		stateFindings,
+		stateObservations,
+		statePrunes,
 		publishAttempts,
 		resourceSamples,
 		customResourceScans,

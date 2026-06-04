@@ -1,0 +1,31 @@
+name: Release Please
+
+# Runs on every push to main. Reads conventional commits since the last
+# release, then creates or updates a release PR that bumps version.txt and
+# CHANGELOG.md. Merging the PR creates the GitHub Release and SemVer tag,
+# which triggers release.yaml to publish images and binaries.
+#
+# PAT note: GITHUB_TOKEN cannot trigger downstream workflows. Add a classic PAT
+# with repo + workflow scopes as RELEASE_PLEASE_TOKEN and it will be used
+# instead. Without it, release.yaml can still be triggered manually with the
+# version input.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Create or update release PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
