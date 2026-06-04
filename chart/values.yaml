@@ -1,0 +1,232 @@
+image:
+  repository: ghcr.io/foxj77/autonomous-monitor
+  # Tag defaults to the chart's appVersion when left empty.
+  # Pin to an exact version tag (e.g. "0.1.0") in production to avoid
+  # unexpected upgrades. Avoid mutable tags like "latest" in conjunction
+  # with imagePullPolicy: IfNotPresent — Kubernetes will not pull a new
+  # image if one with that tag is already cached on the node.
+  tag: ""
+  # Use IfNotPresent with immutable version tags (recommended).
+  # Switch to Always only if you are tracking a mutable tag such as "latest".
+  pullPolicy: IfNotPresent
+
+# Credentials for pulling from private registries. Not needed for the public
+# GHCR image. See: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+imagePullSecrets: []
+
+# Override the chart name used in resource names and labels.
+nameOverride: ""
+# Override the fully-qualified resource name. Useful when installing the same
+# chart twice in the same namespace under different release names.
+fullnameOverride: ""
+
+# One monitor per namespace. WATCH_NAMESPACE is wired from the pod's own
+# namespace by default. If you set watch.namespace explicitly, the monitor
+# is locked to that namespace regardless of where the chart is installed
+# (e.g. for GitOps with per-target overlays that don't need their own
+# Release.Namespace).
+watch:
+  namespace: ""
+
+service:
+  # Exposed for Prometheus scraping. ClusterIP is the right default for
+  # in-cluster scraping; switch to LoadBalancer only if your network
+  # policy does not allow pod-to-pod scraping on port 8080.
+  type: ClusterIP
+  port: 8080
+
+serviceAccount:
+  # Set to true if the chart should create a ServiceAccount. Disable if
+  # the cluster has a shared ServiceAccount convention you want to reuse.
+  create: true
+  # Override the auto-generated name. The default is
+  # "<release-name>-autonomous-monitor" which is fine for per-namespace
+  # installs. Leave empty to use the chart default.
+  name: ""
+  # Annotations added to the ServiceAccount. Useful for IRSA, Workload
+  # Identity, Vault Agent injection, etc.
+  annotations: {}
+
+# Security context. The defaults match the published manifest/base/ and
+# are appropriate for a multi-tenant cluster (non-root, RO rootfs,
+# dropped caps, RuntimeDefault seccomp).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Conservative defaults — the monitor is I/O bound on the Kubernetes
+# API, not CPU bound. 100m CPU and 128Mi memory is comfortable for a
+# single namespace with ~50 pods.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+# Probes hit /metrics which is always serving. The monitor has no
+# separate health endpoint because liveness and readiness reduce to the
+# same question: is the metrics port open?
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Annotations added to the Pod. Useful for Prometheus scraping
+# (prometheus.io/scrape: "true"), Vault agent injection, Datadog APM, etc.
+podAnnotations: {}
+
+# Extra labels added to the Pod. Useful for cost allocation, network
+# policies, or custom selectors.
+podLabels: {}
+
+# Constrain the pod to nodes matching these labels.
+nodeSelector: {}
+
+# Allow the pod to be scheduled on tainted nodes.
+tolerations: []
+
+# Advanced scheduling rules (node affinity, pod affinity/anti-affinity).
+affinity: {}
+
+# ConfigMap name used to persist state. The monitor creates it on first
+# run. To pin a specific name (e.g. for backup policies), set it here.
+state:
+  configMapName: autonomous-monitor-state
+
+# ── Kafka-compatible broker ────────────────────────────────────────────
+# The broker the monitor publishes Findings to. Use the in-cluster
+# service DNS for brokers running in the same cluster. For brokers
+# outside the cluster, use the externally-resolvable hostname and set
+# the corresponding egress rules in networkPolicy below.
+kafka:
+  # Default points at a Redpanda broker in the same cluster. The
+  # monitor has no opinion on which broker you use, so long as it
+  # speaks the Kafka wire protocol.
+  broker: "redpanda.redpanda.svc.cluster.local:9092"
+  topic: "k8s.namespace.findings"
+  # Per-publish wait for broker delivery confirmation. Failed
+  # publishes are retried on the next poll.
+  publishTimeout: 10s
+
+# ── Check families ─────────────────────────────────────────────────────
+# Toggle individual check families on or off. All default to true
+# except where a backend is required (resource usage needs metrics-server).
+checks:
+  pods: true
+  events: true
+  logs: true
+  workloads: true
+  scaling: true
+  resourceUsage: true
+  resourceSpecs: true
+  customResources: true
+  services: true
+  pvcs: true
+
+# ── Resource usage backend ─────────────────────────────────────────────
+# Set to "disabled" to skip the metrics-server wiring entirely even
+# when checks.resourceUsage is true. The monitor will degrade
+# gracefully (no memory-trend findings) and emit a debug log on start.
+resourceUsage:
+  backend: metrics-server
+
+# ── Thresholds ─────────────────────────────────────────────────────────
+# All durations are Go duration strings: "30s", "5m", "1h", etc.
+thresholds:
+  pollInterval: 60s
+  checkTimeout: 30s
+  stateWriteInterval: 60s
+  resolvedFindingRetention: 24h
+  observationRetention: 24h
+  maxObservations: 5000
+  maxFindings: 2000
+  maxStateBytes: 921600  # 900 KiB; safely under the 1 MiB etcd object limit
+  memoryWarningPercent: 80
+  memoryCriticalPercent: 90
+  restartWarningCount: 3
+  restartWindow: 10m
+  eventLookback: 30m
+  logScanLines: 100
+
+# ── Downstream triage flagging ─────────────────────────────────────────
+# The monitor never calls a model itself. It sets ai_triage_required on
+# each finding that meets the score threshold, and an external consumer
+# (a webhook, a queue worker, a SIEM forwarder) is expected to act on
+# that flag. The variable is named DOWNSTREAM_TRIAGE_* to make the
+# contract explicit. Legacy AI_* env names still work; the monitor logs
+# a one-shot deprecation warning.
+downstreamTriage:
+  enabled: true
+  minScore: 60
+  cooldown: 30m
+  cooldownIncident: 10m
+
+# ── Suppression ConfigMap ──────────────────────────────────────────────
+# If set, the monitor reads this ConfigMap from the watch namespace
+# each poll. Keys are "kind/name/reason" with "*" wildcards allowed;
+# values are ignored. Suppressed findings are still computed and
+# scored, they are just not published.
+suppression:
+  configMapName: ""
+
+# ── Custom resource scanning ───────────────────────────────────────────
+# The monitor uses discovery.ServerGroupsAndResources() to enumerate
+# namespaced custom resources. By default, the Role grants no access
+# to any custom resource group — you have to opt in explicitly.
+customResources:
+  # Comma-separated allowlist of API groups (or group/version/resource
+  # patterns) to scan. Group entries match every resource in the group.
+  allowlist: []
+  # Comma-separated excludelist. The excludelist wins over the allowlist.
+  excludelist: []
+  # How long to cache API discovery results.
+  discoveryTTL: 10m
+  # Extra RBAC rules to add to the monitor's Role so it can read the
+  # custom resources listed above. Each entry is an RBAC rule object
+  # of the same shape as a single entry in a Role.rules[] list.
+  #
+  # Example: grant access to all Flux custom resources
+  #   rbacRules:
+  #     - apiGroups: ["source.toolkit.fluxcd.io", "helm.toolkit.fluxcd.io", "kustomize.toolkit.fluxcd.io"]
+  #       resources: ["*"]
+  #       verbs: ["get", "list", "watch"]
+  rbacRules: []
+
+# ── NetworkPolicy ──────────────────────────────────────────────────────
+# Default-deny ingress + tight egress (DNS, API server, Kafka broker).
+# Set enabled: false to skip the NetworkPolicy entirely (e.g. clusters
+# without a NetworkPolicy controller). To restrict the metrics
+# ingress selector, set ingress.metrics.from to a podSelector or
+# namespaceSelector.
+networkPolicy:
+  enabled: true
+  ingress:
+    metrics:
+      # If set, restrict :8080 ingress to the given podSelector.
+      # If empty, any pod in any namespace can scrape metrics.
+      # Example: { podSelector: { matchLabels: { app.kubernetes.io/name: prometheus } } }
+      from: {}
+  egress:
+    # If set, override the broker egress. The default allows 9092 and
+    # 9093 to any destination, which covers plaintext and TLS Kafka.
+    # To lock down further, provide a list of egress rules.
+    overrides: []

@@ -54,7 +54,52 @@ The image is multi-arch (`linux/amd64`, `linux/arm64`).
 go install github.com/foxj77/autonomous-monitor@latest
 ```
 
-The build requires CGO and `librdkafka-dev` (the binary links against `confluent-kafka-go`). See `Dockerfile` for the reference build environment.
+The build has two variants:
+
+| Variant | Build command | When to use |
+|---|---|---|
+| **Default** (production) | `CGO_ENABLED=1 go build -tags musl -o autonomous-monitor .` | Released images. Uses `confluent-kafka-go/v2` with `librdkafka` for the richest producer callbacks. |
+| **Pure Go** (developer) | `go build -tags 'musl kafka_pure' -o autonomous-monitor .` | No CGO, no `librdkafka`. Uses `twmb/franz-go` for the same delivery-confirmation contract. Use this if you don't have a C toolchain. |
+
+The default build requires `librdkafka-dev` (the binary links against `confluent-kafka-go`). See `Dockerfile` for the reference build environment. See `Dockerfile.pure` for the no-CGO build.
+
+### Try it locally (no cluster required)
+
+The fastest way to see the monitor in action is the [examples/quickstart](./examples/quickstart)
+`docker compose` stack, which runs Redpanda, the monitor, and a Go consumer
+on a single host:
+
+```bash
+cd examples/quickstart
+docker compose up --build
+docker compose logs -f consumer
+```
+
+## Helm chart
+
+The monitor ships with a Helm chart at [`chart/`](./chart) and
+publishes it to GHCR as an OCI artifact on every release. Install
+the latest published version with:
+
+```bash
+helm install autonomous-monitor \
+  oci://ghcr.io/foxj77/charts/autonomous-monitor \
+  --version 0.1.0 \
+  --namespace my-namespace \
+  --create-namespace \
+  --set kafka.broker=my-broker.my-namespace.svc.cluster.local:9092 \
+  --set kafka.topic=k8s.namespace.findings
+```
+
+The chart is namespace-scoped (one release per target namespace) and
+includes a default-deny `NetworkPolicy` plus the `ServiceAccount`,
+`Role`, and `RoleBinding` the monitor needs. See
+[`chart/values.yaml`](./chart/values.yaml) for the full set of knobs
+and [`chart/README.md`](./chart/README.md) for a per-knob explanation.
+
+The chart is validated on every PR (`helm lint` + render asserts +
+schema negative tests) and packaged + pushed to `oci://ghcr.io/foxj77/charts`
+on every release.
 
 ## Quick start
 
@@ -85,9 +130,9 @@ spec:
               value: k8s.namespace.findings
             - name: STATE_CONFIGMAP_NAME
               value: autonomous-monitor-state
-            - name: AI_TRIAGE_ENABLED
+            - name: DOWNSTREAM_TRIAGE_ENABLED
               value: "true"
-            - name: AI_MIN_SCORE
+            - name: DOWNSTREAM_MIN_SCORE
               value: "60"
           ports:
             - name: metrics
@@ -158,10 +203,14 @@ All configuration is environment-driven.
 | `MAX_OBSERVATIONS` | `5000` | Hard cap for observation entries kept in state |
 | `MAX_FINDINGS` | `2000` | Hard cap for finding entries kept in state |
 | `MAX_STATE_BYTES` | `921600` | Maximum serialized state size before a write is refused |
-| `AI_TRIAGE_ENABLED` | `true` | Mark findings for AI dispatch |
-| `AI_MIN_SCORE` | `60` | Findings at or above this score are flagged |
-| `AI_COOLDOWN` | `30m` | Per-finding cooldown between AI dispatches |
-| `AI_COOLDOWN_INCIDENT` | `10m` | Shorter cooldown for `incident-likely` findings |
+| `DOWNSTREAM_TRIAGE_ENABLED` | `true` | Mark findings for downstream triage. The monitor never calls a model itself; it sets `ai_triage_required: true` on the published finding and expects a consumer to act on it. |
+| `DOWNSTREAM_MIN_SCORE` | `60` | Findings at or above this score are flagged for downstream triage |
+| `DOWNSTREAM_COOLDOWN` | `30m` | Per-finding cooldown between triage flag emissions |
+| `DOWNSTREAM_COOLDOWN_INCIDENT` | `10m` | Shorter cooldown for `incident-likely` findings |
+| `AI_TRIAGE_ENABLED` | _(deprecated)_ | Alias for `DOWNSTREAM_TRIAGE_ENABLED`. Will be removed in v1.0.0. |
+| `AI_MIN_SCORE` | _(deprecated)_ | Alias for `DOWNSTREAM_MIN_SCORE`. |
+| `AI_COOLDOWN` | _(deprecated)_ | Alias for `DOWNSTREAM_COOLDOWN`. |
+| `AI_COOLDOWN_INCIDENT` | _(deprecated)_ | Alias for `DOWNSTREAM_COOLDOWN_INCIDENT`. |
 | `SUPPRESS_CONFIGMAP` | _(unset)_ | CM with `kind/name/reason` keys (wildcards `*` allowed) |
 | `LOG_SCAN_LINES` | `100` | Lines to tail per container for log scanning |
 | `RESOURCE_USAGE_BACKEND` | `metrics-server` | `metrics-server` or `disabled` |
@@ -279,3 +328,14 @@ See [SECURITY.md](./SECURITY.md) for how to report a vulnerability.
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for the path to v1.0.0 and what is in
+scope versus explicitly out of scope.
+
+## Examples
+
+See [examples/](./examples) for a runnable quickstart (Redpanda +
+monitor + consumer in `docker compose`), a standalone Go consumer you
+can fork, and a Grafana dashboard JSON.

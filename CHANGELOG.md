@@ -11,15 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Default `REDPANDA_BROKER` changed from a homelab-specific service DNS to `localhost:9092` so the binary is usable on a fresh cluster without overrides
 - Default `FINDINGS_TOPIC` changed from `k8s.events.triaged` to `k8s.namespace.findings` to match the documented public contract
+- Renamed internal config fields `AITriageEnabled` / `AIMinScore` / `AICooldown` / `AICooldownIncident` to `DownstreamTriageEnabled` / `DownstreamMinScore` / `DownstreamCooldown` / `DownstreamCooldownIncident`. The Finding JSON field `ai_triage_required` is unchanged for backward compatibility.
 
 ### Added
 
-- Comprehensive unit tests for previously untested check logic (`checks_test.go`)
-- Delivery-aware publishing: Kafka sends now wait for broker delivery confirmation, failed publishes are retried, and publish attempts are exposed via metrics
-- `PUBLISH_TIMEOUT` configuration for bounding Kafka delivery confirmation waits
-- Release workflow now publishes raw binaries as a separate `<tag>-binary` OCI artifact, keeping container image tags unambiguous
-- Service, PVC, and HPA scaling checks are now implemented and wired into the monitor poll loop
-- Poll-level tests now verify configured check families actually run when enabled
+- `test-reports/` directory with a structured report (catalogue of every
+  test with purpose, expected, and actual results) plus raw evidence
+  (`*.txt`, `*.json`, `*.tsv`, `*.out` for both build paths, lint, and
+  coverage). Captured against the most recent test run.
+- `chart/` directory: a namespace-scoped Helm chart that is validated
+  on every PR (lint + render + schema negative tests) and packaged +
+  pushed to `oci://ghcr.io/foxj77/charts/autonomous-monitor` on every
+  release. See `chart/README.md` for per-knob documentation and
+  install examples.
+- `helm-publish` job in the release workflow packages the chart and
+  pushes it to `oci://ghcr.io/foxj77/charts/autonomous-monitor` on
+  every release / versioned manual dispatch.
+- `chart` job in the CI workflow runs `helm lint`, three render
+  assertions (default values, custom CRB + ingress selector, and four
+  schema negative tests) on every PR.
+
+### Fixed
+
+- `.gitignore` no longer permits `coverage.out` to be checked in accidentally; the existing rule is now commented so the next contributor understands why.
 
 ## [0.1.0] - 2026-06-01
 

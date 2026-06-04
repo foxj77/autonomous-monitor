@@ -38,13 +38,35 @@ golangci-lint run
 
 # build (requires librdkafka)
 CGO_ENABLED=1 go build -tags musl -o autonomous-monitor .
+
+# build the pure-Go variant (no CGO, no librdkafka)
+go build -tags 'musl kafka_pure' -o autonomous-monitor .
 ```
 
-If you don't have `librdkafka` installed, the easiest way to build is via the provided `Dockerfile`:
+If you don't have `librdkafka` installed, you have two options:
 
-```bash
-docker build -t autonomous-monitor:dev .
-```
+1. Build the pure-Go variant with `-tags kafka_pure`. This swaps the
+   Kafka publisher to `twmb/franz-go`, which has zero CGO dependencies.
+   The Finding JSON contract and the rest of the binary are identical.
+2. Use the provided `Dockerfile` (default CGO build):
+
+   ```bash
+   docker build -t autonomous-monitor:dev .
+   ```
+
+## Lint configuration
+
+The `.golangci.yml` disables a small set of linters (`errcheck`,
+`gosec`, `gocritic`, `unparam`) inside `_test.go` files. Test code in
+this project exercises the Kubernetes fake client, which intentionally
+ignores errors from generated `List`/`Get` reactors, and the suppressions
+keep the test surface noise-free. Production code in `*.go` (not `_test.go`)
+runs the full default set plus `bodyclose`, `errorlint`, `gosec`,
+`revive`, `thelper`, `tparallel`, `unconvert`, and `wastedassign`.
+
+If you add a new package or a non-test file, do not add per-file
+`//nolint:` directives without an explanatory comment — the project
+prefers to fix the root cause.
 
 ## Adding a new check family
 
@@ -55,6 +77,23 @@ Check families are plain methods on `*Monitor` in `checks.go`. Each returns a `c
 3. Wire the new check into `Monitor.Poll` in `monitor.go`
 4. Add tests using the existing `newTestMonitor` helper in `checks_test.go`
 5. Document the new env var in the README
+
+## Swapping the Kafka publisher
+
+The default build links against `confluent-kafka-go/v2` (CGO +
+`librdkafka`). A pure-Go variant using `twmb/franz-go` is available
+behind the `kafka_pure` build tag:
+
+```bash
+go build -tags 'musl kafka_pure' -o autonomous-monitor .
+go test -tags 'kafka_pure' ./...
+```
+
+Both paths implement the `Publisher` interface in `publisher.go`.
+`main.go` calls `NewKafkaPublisher(...)`; the implementation is selected
+at compile time by the `//go:build` tags on `publisher_confluent.go`
+and `publisher_pure.go`. New Kafka-related code should keep the
+interface stable and avoid leaking either client into call sites.
 
 ## Release process
 

@@ -1,0 +1,255 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Operational dashboard for the autonomous-monitor Kubernetes namespace monitor. Visualises poll health, finding rates, active findings by classification, AI dispatch pressure, and the state ConfigMap footprint.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "autonomous-monitor",
+  "title": "autonomous-monitor",
+  "tags": ["kubernetes", "autonomous-monitor", "monitoring"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(autonomous_monitor_poll_duration_seconds, namespace)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": false, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Poll duration (p50 / p95 / p99)",
+      "description": "Latency of one full poll cycle. Spikes usually mean slow Kubernetes API responses or a check family hitting its timeout.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, namespace) (rate(autonomous_monitor_poll_duration_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p50 {{namespace}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, namespace) (rate(autonomous_monitor_poll_duration_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p95 {{namespace}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, namespace) (rate(autonomous_monitor_poll_duration_seconds_bucket{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p99 {{namespace}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Checks per second by result",
+      "description": "Rate of check family executions. Result=timeout is the most actionable line: persistent timeouts mean the monitor is falling behind.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "stacking": { "mode": "normal" } }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace, result) (rate(autonomous_monitor_checks_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{namespace}} :: {{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Findings published per second by classification",
+      "description": "Rate of new findings. A sudden jump in 'incident-likely' usually warrants immediate attention.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" } }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace, classification) (rate(autonomous_monitor_findings_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{namespace}} :: {{classification}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active findings",
+      "description": "Current count of ongoing findings by classification. Anything in 'incident-likely' is real.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace, classification) (autonomous_monitor_active_findings{namespace=~\"$namespace\"})",
+          "legendFormat": "{{namespace}} :: {{classification}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "AI dispatch requests vs cooldowns",
+      "description": "How often the monitor is flagging findings for downstream triage. Cooldowns throttle that rate; a high cooldown-to-request ratio means the monitor is being polite to its downstream consumer.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace) (rate(autonomous_monitor_ai_dispatch_requests_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "dispatch :: {{namespace}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (namespace) (rate(autonomous_monitor_ai_cooldowns_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "cooldown :: {{namespace}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "State ConfigMap footprint",
+      "description": "Bytes and entry counts in the per-namespace state ConfigMap. Approaching MAX_STATE_BYTES means prune policies are working as designed; sudden drops are fine, sudden growth that doesn't stop is a leak.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "autonomous_monitor_state_bytes{namespace=~\"$namespace\"}",
+          "legendFormat": "bytes :: {{namespace}}",
+          "refId": "A"
+        },
+        {
+          "expr": "autonomous_monitor_state_findings{namespace=~\"$namespace\"}",
+          "legendFormat": "findings :: {{namespace}}",
+          "refId": "B"
+        },
+        {
+          "expr": "autonomous_monitor_state_observations{namespace=~\"$namespace\"}",
+          "legendFormat": "observations :: {{namespace}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Publish attempts (ok vs error)",
+      "description": "Rate of publish attempts to the Kafka broker. A persistent error rate means the broker is unreachable or rejecting messages.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace, result) (rate(autonomous_monitor_publish_attempts_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{namespace}} :: {{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "State prunes (last 1h)",
+      "description": "How aggressively the monitor is pruning its own state. Useful for tuning retention knobs.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "namespace", "desc": false }]
+      },
+      "targets": [
+        {
+          "expr": "sum by (namespace, type, reason) (increase(autonomous_monitor_state_prunes_total{namespace=~\"$namespace\"}[1h]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

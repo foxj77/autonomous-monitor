@@ -1,0 +1,21 @@
+apiVersion: v2
+name: autonomous-monitor
+description: Deterministic Kubernetes namespace monitor that publishes JSON findings to a Kafka-compatible broker.
+type: application
+# Version is replaced at publish time with the GitHub Release version.
+# Do not edit manually — it is managed by the CI pipeline.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/foxj77/autonomous-monitor
+sources:
+  - https://github.com/foxj77/autonomous-monitor
+maintainers:
+  - name: foxj77
+    url: https://github.com/foxj77
+keywords:
+  - kubernetes
+  - monitoring
+  - kafka
+  - observability
+  - namespace
+  - findings

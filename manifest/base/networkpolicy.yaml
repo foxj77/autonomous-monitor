@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: autonomous-monitor
+  namespace: default
+spec:
+  # Default-deny ingress on the monitor's pods. Anything not explicitly
+  # allowed below is dropped. Tighten the metrics ingress selector in your
+  # overlay if you do not want cluster-wide scrape access.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: autonomous-monitor
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Prometheus metrics endpoint. Allow any pod in the cluster to scrape
+    # the metrics port. To restrict to a specific scraper, set the
+    # `from:` selector in an overlay.
+    - ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # DNS resolution (kube-dns / CoreDNS).
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kubernetes API server. The API server endpoint is reachable on 443
+    # in-cluster; many managed clusters also expose it on 6443. Allow both
+    # to be safe.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # Kafka-compatible broker. The default is plaintext on 9092; TLS and
+    # SASL deployments commonly use 9093. Allow both so a single base
+    # works for either.
+    - ports:
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP

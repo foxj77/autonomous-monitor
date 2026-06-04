@@ -129,6 +129,83 @@ func TestLoadConfigCustomResourceGroupAliases(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDownstreamTriageDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	cfg := LoadConfig()
+	if !cfg.DownstreamTriageEnabled {
+		t.Fatal("downstream triage should default to enabled")
+	}
+	if cfg.DownstreamMinScore != 60 {
+		t.Fatalf("downstream min score = %d, want 60", cfg.DownstreamMinScore)
+	}
+	if cfg.DownstreamCooldown != 30*time.Minute {
+		t.Fatalf("downstream cooldown = %s, want 30m", cfg.DownstreamCooldown)
+	}
+	if cfg.DownstreamCooldownIncident != 10*time.Minute {
+		t.Fatalf("downstream cooldown incident = %s, want 10m", cfg.DownstreamCooldownIncident)
+	}
+}
+
+func TestLoadConfigDownstreamTriageExplicitEnv(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("DOWNSTREAM_TRIAGE_ENABLED", "false")
+	t.Setenv("DOWNSTREAM_MIN_SCORE", "75")
+	t.Setenv("DOWNSTREAM_COOLDOWN", "45m")
+	t.Setenv("DOWNSTREAM_COOLDOWN_INCIDENT", "5m")
+
+	cfg := LoadConfig()
+	if cfg.DownstreamTriageEnabled {
+		t.Fatal("expected DOWNSTREAM_TRIAGE_ENABLED=false to disable triage")
+	}
+	if cfg.DownstreamMinScore != 75 {
+		t.Fatalf("downstream min score = %d, want 75", cfg.DownstreamMinScore)
+	}
+	if cfg.DownstreamCooldown != 45*time.Minute {
+		t.Fatalf("downstream cooldown = %s, want 45m", cfg.DownstreamCooldown)
+	}
+	if cfg.DownstreamCooldownIncident != 5*time.Minute {
+		t.Fatalf("downstream cooldown incident = %s, want 5m", cfg.DownstreamCooldownIncident)
+	}
+}
+
+func TestLoadConfigDownstreamTriageDeprecatedAlias(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("AI_TRIAGE_ENABLED", "false")
+	t.Setenv("AI_MIN_SCORE", "42")
+	t.Setenv("AI_COOLDOWN", "15m")
+	t.Setenv("AI_COOLDOWN_INCIDENT", "3m")
+
+	cfg := LoadConfig()
+	if cfg.DownstreamTriageEnabled {
+		t.Fatal("expected AI_TRIAGE_ENABLED=false to disable downstream triage via deprecated alias")
+	}
+	if cfg.DownstreamMinScore != 42 {
+		t.Fatalf("downstream min score from deprecated alias = %d, want 42", cfg.DownstreamMinScore)
+	}
+	if cfg.DownstreamCooldown != 15*time.Minute {
+		t.Fatalf("downstream cooldown from deprecated alias = %s, want 15m", cfg.DownstreamCooldown)
+	}
+	if cfg.DownstreamCooldownIncident != 3*time.Minute {
+		t.Fatalf("downstream cooldown incident from deprecated alias = %s, want 3m", cfg.DownstreamCooldownIncident)
+	}
+}
+
+func TestLoadConfigDownstreamTriageNewOverridesDeprecated(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("DOWNSTREAM_TRIAGE_ENABLED", "true")
+	t.Setenv("AI_TRIAGE_ENABLED", "false")
+	t.Setenv("DOWNSTREAM_MIN_SCORE", "88")
+	t.Setenv("AI_MIN_SCORE", "11")
+
+	cfg := LoadConfig()
+	if !cfg.DownstreamTriageEnabled {
+		t.Fatal("expected new env var to win over deprecated alias")
+	}
+	if cfg.DownstreamMinScore != 88 {
+		t.Fatalf("downstream min score = %d, want 88 (new env should win over deprecated)", cfg.DownstreamMinScore)
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -151,6 +228,10 @@ func clearConfigEnv(t *testing.T) {
 		"MAX_OBSERVATIONS",
 		"MAX_FINDINGS",
 		"MAX_STATE_BYTES",
+		"DOWNSTREAM_TRIAGE_ENABLED",
+		"DOWNSTREAM_MIN_SCORE",
+		"DOWNSTREAM_COOLDOWN",
+		"DOWNSTREAM_COOLDOWN_INCIDENT",
 		"AI_TRIAGE_ENABLED",
 		"AI_MIN_SCORE",
 		"AI_COOLDOWN",
