@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/foxj77/autonomous-monitor/compare/v0.1.0...v0.2.0) (2026-06-04)
+
+
+### Features
+
+* add pure-Go Kafka path, helm chart, examples, and test reports ([0b31e1c](https://github.com/foxj77/autonomous-monitor/commit/0b31e1c7def595d08f5dfbd8539fe2b713673fc5))
+* bound per-check poll latency ([5674f7d](https://github.com/foxj77/autonomous-monitor/commit/5674f7d3bd32d05cc372cd68c24c1350b7ab3cbd))
+* control custom resource scanning ([763e93b](https://github.com/foxj77/autonomous-monitor/commit/763e93beba33bd8e7ccce0f21bb870ae94587191))
+* harden state and align releases ([b7b196d](https://github.com/foxj77/autonomous-monitor/commit/b7b196d4abf2b4107012dbed07479e6968d0cdef))
+* initial public release of autonomous-monitor ([4b7f7b8](https://github.com/foxj77/autonomous-monitor/commit/4b7f7b87847cad6d964aeef0f1240faf82dffa99))
+
+
+### Bug Fixes
+
+* **ci:** align Go and lint toolchain ([#13](https://github.com/foxj77/autonomous-monitor/issues/13)) ([075eb1e](https://github.com/foxj77/autonomous-monitor/commit/075eb1e8a7c7e7c883203d76ab9c831a0fa049f2))
+* **ci:** bump golangci-lint to v2 to match .golangci.yml v2 schema ([b4ad233](https://github.com/foxj77/autonomous-monitor/commit/b4ad23385fedd3c27e1ae673d6fed8c44e7179e7))
+* **ci:** bump golangci-lint-action to v7 for golangci-lint v2 support ([78469ba](https://github.com/foxj77/autonomous-monitor/commit/78469ba181aa9791a6da45e107dac734ae3929e5))
+* **ci:** drop arm64 cross-compile from CI build job ([b8391ff](https://github.com/foxj77/autonomous-monitor/commit/b8391ff2203d425b0a367cdb5b17d46d96c81226))
+* **release:** checkout repo in OCI artifact job so README.md is available ([b2df863](https://github.com/foxj77/autonomous-monitor/commit/b2df8635085bac895afc8a570fa3f6b669f5a1f4))
+* **release:** install oras via curl instead of oras-project/setup-oras ([656e8e4](https://github.com/foxj77/autonomous-monitor/commit/656e8e4d5527aae62aea01c5c3d575bec05ec3e8))
+* **release:** pin oras to a real release version v1.3.2 ([765dd90](https://github.com/foxj77/autonomous-monitor/commit/765dd90cb5eb93a97b08da064b6136b07e6b73bb))
+* **release:** use buildx imagetools Digest header for cosign signing ([256ff83](https://github.com/foxj77/autonomous-monitor/commit/256ff83e737576786b3e5ca38412af037bdd2319))
+* **release:** use Docker buildx for multi-arch builds and OCI signing ([5ceaea6](https://github.com/foxj77/autonomous-monitor/commit/5ceaea6f61f0829d3306adc84ec0fc7c07e550d4))
+* **release:** use latest oras CLI in setup-oras action ([40e34d4](https://github.com/foxj77/autonomous-monitor/commit/40e34d445eba2e7871a62cbd008a0cf0da963e24))
+* satisfy custom resource lint ([98753eb](https://github.com/foxj77/autonomous-monitor/commit/98753eb5366bc0fcac00050d305c81329cb1643d))
+* **scorecard:** pin resolvable action version ([#14](https://github.com/foxj77/autonomous-monitor/issues/14)) ([2ebde1b](https://github.com/foxj77/autonomous-monitor/commit/2ebde1bdbec96ab85800f215e26d66b05bdd55a2))
+* **scorecard:** remove global write permissions ([#15](https://github.com/foxj77/autonomous-monitor/issues/15)) ([09af9b9](https://github.com/foxj77/autonomous-monitor/commit/09af9b9e5f0c3737ef27fcf17945d26bfb9984d5))
+
+
+### Performance
+
+* **checks:** pre-allocate findings slices where size is known ([559bda2](https://github.com/foxj77/autonomous-monitor/commit/559bda208db5aa4cfeeab2156856428fd3ee0412))
+
 ## [Unreleased]
 
 ### Changed
