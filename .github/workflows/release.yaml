@@ -1,11 +1,16 @@
 name: release
 
-# Triggered when release-please publishes a GitHub Release. Builds and pushes
-# SemVer-tagged images and release artifacts. Manual dispatch can publish a
-# supplied SemVer version, or an edge/sha-only build when version is blank.
+# Triggered when release-please publishes a GitHub Release. If that release is
+# created with the default GitHub token and the release event is suppressed, the
+# workflow_run trigger below detects the SemVer tag that release-please created
+# and publishes the same artifacts. Manual dispatch can publish a supplied
+# SemVer version, or an edge/sha-only build when version is blank.
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: ["Release Please"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -35,23 +40,54 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       binary_tag: ${{ steps.meta.outputs.binary_tag }}
       ref_name: ${{ steps.meta.outputs.ref_name }}
+      major: ${{ steps.meta.outputs.major }}
+      major_minor: ${{ steps.meta.outputs.major_minor }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - id: meta
         run: |
           if [[ "${{ github.event_name }}" == "release" ]]; then
             tag="${{ github.ref_name }}"
             version="${tag#v}"
             is_stable="true"
+            should_publish="true"
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            if [[ "${{ github.event.workflow_run.conclusion }}" != "success" || "${{ github.event.workflow_run.head_branch }}" != "main" ]]; then
+              echo "Release Please did not complete successfully on main; skipping publish."
+              should_publish="false"
+              tag=""
+              version=""
+              is_stable="false"
+            else
+              workflow_sha="${{ github.event.workflow_run.head_sha }}"
+              tag=$(git tag --points-at "$workflow_sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+              if [[ -z "$tag" ]]; then
+                echo "No SemVer tag points at ${workflow_sha}; skipping publish."
+                should_publish="false"
+                version=""
+                is_stable="false"
+              else
+                version="${tag#v}"
+                is_stable="true"
+                should_publish="true"
+              fi
+            fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
             version="${{ inputs.version }}"
             version="${version#v}"
             tag="v${version}"
             is_stable="true"
+            should_publish="true"
           else
             short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
             tag="edge-${short_sha}"
             version=""
             is_stable="false"
+            should_publish="true"
           fi
 
           if [[ "$is_stable" == "true" && ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -59,16 +95,27 @@ jobs:
             exit 1
           fi
 
+          major=""
+          major_minor=""
+          if [[ "$is_stable" == "true" ]]; then
+            IFS=. read -r major minor patch <<< "$version"
+            major_minor="${major}.${minor}"
+          fi
+
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "binary_tag=${tag}-binary" >> "$GITHUB_OUTPUT"
           echo "is_stable=${is_stable}" >> "$GITHUB_OUTPUT"
           echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
+          echo "major=${major}" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
 
   binaries:
     name: Build binaries
     runs-on: ubuntu-latest
     needs: resolve-metadata
+    if: needs.resolve-metadata.outputs.should_publish == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -134,6 +181,7 @@ jobs:
     name: Container image
     runs-on: ubuntu-latest
     needs: resolve-metadata
+    if: needs.resolve-metadata.outputs.should_publish == 'true'
     permissions:
       contents: read
       packages: write
@@ -157,7 +205,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
-            type=raw,value=${{ needs.resolve-metadata.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && needs.resolve-metadata.outputs.version != '' }}
+            type=raw,value=${{ needs.resolve-metadata.outputs.version }},enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' }}
+            type=raw,value=${{ needs.resolve-metadata.outputs.major_minor }},enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' }}
+            type=raw,value=${{ needs.resolve-metadata.outputs.major }},enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' && !startsWith(needs.resolve-metadata.outputs.tag, 'v0.') }}
             type=raw,value=latest,enable=${{ needs.resolve-metadata.outputs.is_stable == 'true' }}
             type=raw,value=edge,enable=${{ needs.resolve-metadata.outputs.is_stable != 'true' }}
             type=sha,format=short,prefix=sha-
@@ -199,6 +249,7 @@ jobs:
     name: cosign sign
     runs-on: ubuntu-latest
     needs: [resolve-metadata, container]
+    if: needs.resolve-metadata.outputs.should_publish == 'true'
     permissions:
       contents: read
       packages: write
@@ -232,6 +283,7 @@ jobs:
     name: OCI artifact (binary)
     runs-on: ubuntu-latest
     needs: [resolve-metadata, binaries]
+    if: needs.resolve-metadata.outputs.should_publish == 'true'
     permissions:
       contents: read
       packages: write
@@ -280,6 +332,7 @@ jobs:
     name: GitHub release
     runs-on: ubuntu-latest
     needs: [resolve-metadata, binaries, container, cosign-sign, publish-oci-artifact, helm-publish]
+    if: needs.resolve-metadata.outputs.should_publish == 'true'
     permissions:
       contents: write
       packages: read
@@ -353,8 +406,8 @@ jobs:
     name: Package and push Helm chart
     runs-on: ubuntu-latest
     needs: [resolve-metadata]
-    # Runs on real releases and on manual dispatches where a version is supplied.
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    # Runs on real SemVer releases and on manual dispatches where a version is supplied.
+    if: needs.resolve-metadata.outputs.should_publish == 'true' && needs.resolve-metadata.outputs.is_stable == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -365,14 +418,8 @@ jobs:
 
       - name: Extract version
         id: version
-        # On a release event: strip the leading 'v' from the tag (v0.2.0 → 0.2.0).
-        # On a manual dispatch: use the version input directly.
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "version=${{ needs.resolve-metadata.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Stamp version into Chart.yaml
         run: |
