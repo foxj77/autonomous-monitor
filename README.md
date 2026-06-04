@@ -97,11 +97,11 @@ spec:
             limits:   { cpu: 100m, memory: 128Mi }
 ```
 
-See `manifest/base/` for a complete example with ServiceAccount, Role, RoleBinding, and Service.
+See `manifest/base/` for a complete namespace-scoped example with ServiceAccount, Role, RoleBinding, and Service.
 
 ### RBAC
 
-The monitor needs **namespace-scoped** read access. Cluster-scoped discovery is only used to enumerate `namespaced` custom resources it can list, not to fetch their data cross-namespace.
+The monitor needs **namespace-scoped** read access. The default manifests do not grant cluster-wide resource reads.
 
 Minimum:
 
@@ -128,13 +128,15 @@ rules:
     verbs: [create, update, patch]
 ```
 
-To monitor **custom resources**, grant `list` on each CRD you care about. The monitor uses `discovery.ServerGroupsAndResources()` to enumerate the namespaced resources it can see, so granting cluster-wide `list` on a CRD group is the cleanest approach:
+To monitor **custom resources**, grant namespaced access to each custom resource type you care about. The monitor uses `discovery.ServerGroupsAndResources()` to enumerate namespaced resources, then lists only in `WATCH_NAMESPACE`:
 
 ```yaml
   - apiGroups: ["source.toolkit.fluxcd.io", "helm.toolkit.fluxcd.io"]
     resources: ["*"]
-    verbs: [get, list]
+    verbs: [get, list, watch]
 ```
+
+Add those rules to the monitor's namespace `Role` for each namespace you monitor. Most clusters allow authenticated API discovery without additional RBAC; if your cluster restricts discovery endpoints, use `manifest/overlays/cluster-discovery` to grant the narrow cluster-scoped discovery permission. That overlay does not grant cross-namespace resource access.
 
 ## Configuration
 

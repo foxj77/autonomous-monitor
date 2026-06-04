@@ -173,10 +173,16 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          PACKAGE_NAME: ${{ github.event.repository.name }}
         run: |
-          PACKAGE_NAME="${{ github.event.repository.name }}/autonomous-monitor"
           ENCODED="${PACKAGE_NAME//\//%2F}"
-          gh api --method PATCH "/user/packages/container/${ENCODED}/visibility" -f visibility=public
+          if [[ "$OWNER_TYPE" == "Organization" ]]; then
+            gh api --method PATCH "/orgs/${OWNER}/packages/container/${ENCODED}/visibility" -f visibility=public
+          else
+            gh api --method PATCH "/user/packages/container/${ENCODED}/visibility" -f visibility=public
+          fi
 
   cosign-sign:
     name: cosign sign
