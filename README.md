@@ -148,6 +148,7 @@ All configuration is environment-driven.
 | `REDPANDA_BROKER` | `localhost:9092` | Kafka-compatible broker |
 | `FINDINGS_TOPIC` | `k8s.namespace.findings` | Topic for JSON findings |
 | `PUBLISH_TIMEOUT` | `10s` | How long to wait for broker delivery confirmation before retrying later |
+| `CHECK_TIMEOUT` | `30s` | Maximum time a single check family can spend in one poll |
 | `STATE_CONFIGMAP_NAME` | `autonomous-monitor-state` | Per-namespace state CM |
 | `STATE_WRITE_INTERVAL` | `60s` | Throttle for state CM writes |
 | `RESOLVED_FINDING_RETENTION` | `24h` | Drop resolved findings from state after this |
@@ -160,7 +161,6 @@ All configuration is environment-driven.
 | `RESOURCE_USAGE_BACKEND` | `metrics-server` | `metrics-server` or `disabled` |
 | `MEMORY_WARNING_PERCENT` | `80` | Memory % of limit that triggers a `memory-high` finding |
 | `MEMORY_CRITICAL_PERCENT` | `90` | Memory % of limit that triggers a `memory-critical` finding |
-| `CPU_WARNING_PERCENT` | `80` | _(reserved for future CPU check)_ |
 | `RESTART_WARNING_COUNT` | `3` | Restart-count delta within window that triggers a finding |
 | `RESTART_WINDOW` | `10m` | Window for the restart-rate detector |
 | `EVENT_LOOKBACK` | `30m` | How far back to consider warning events |

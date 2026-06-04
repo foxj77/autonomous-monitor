@@ -54,11 +54,25 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.PublishTimeout != 10*time.Second {
 		t.Fatalf("publish timeout = %s, want 10s", cfg.PublishTimeout)
 	}
+	if cfg.CheckTimeout != 30*time.Second {
+		t.Fatalf("check timeout = %s, want 30s", cfg.CheckTimeout)
+	}
 	if cfg.CustomResourceDiscoveryTTL != 10*time.Minute {
 		t.Fatalf("custom resource discovery ttl = %s, want 10m", cfg.CustomResourceDiscoveryTTL)
 	}
 	if len(cfg.CustomResourceAllowlist) != 0 || len(cfg.CustomResourceExcludelist) != 0 {
 		t.Fatalf("custom resource lists should default empty, got allow=%v exclude=%v", cfg.CustomResourceAllowlist, cfg.CustomResourceExcludelist)
+	}
+}
+
+func TestLoadConfigCheckTimeout(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CHECK_TIMEOUT", "250ms")
+
+	cfg := LoadConfig()
+
+	if cfg.CheckTimeout != 250*time.Millisecond {
+		t.Fatalf("check timeout = %s, want 250ms", cfg.CheckTimeout)
 	}
 }
 
@@ -117,7 +131,9 @@ func clearConfigEnv(t *testing.T) {
 		"REDPANDA_BROKER",
 		"FINDINGS_TOPIC",
 		"PUBLISH_TIMEOUT",
+		"CHECK_TIMEOUT",
 		"STATE_CONFIGMAP_NAME",
+		"STATE_WRITE_INTERVAL",
 		"RESOLVED_FINDING_RETENTION",
 		"AI_TRIAGE_ENABLED",
 		"AI_MIN_SCORE",
@@ -125,7 +141,6 @@ func clearConfigEnv(t *testing.T) {
 		"AI_COOLDOWN_INCIDENT",
 		"MEMORY_WARNING_PERCENT",
 		"MEMORY_CRITICAL_PERCENT",
-		"CPU_WARNING_PERCENT",
 		"RESTART_WARNING_COUNT",
 		"RESTART_WINDOW",
 		"EVENT_LOOKBACK",
