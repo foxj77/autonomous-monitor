@@ -42,6 +42,7 @@ jobs:
       ref_name: ${{ steps.meta.outputs.ref_name }}
       major: ${{ steps.meta.outputs.major }}
       major_minor: ${{ steps.meta.outputs.major_minor }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
       should_publish: ${{ steps.meta.outputs.should_publish }}
     steps:
       - uses: actions/checkout@v4
@@ -97,9 +98,11 @@ jobs:
 
           major=""
           major_minor=""
+          image_tag="$tag"
           if [[ "$is_stable" == "true" ]]; then
             IFS=. read -r major minor patch <<< "$version"
             major_minor="${major}.${minor}"
+            image_tag="$version"
           fi
 
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
@@ -109,6 +112,7 @@ jobs:
           echo "ref_name=${tag}" >> "$GITHUB_OUTPUT"
           echo "major=${major}" >> "$GITHUB_OUTPUT"
           echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
           echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
 
   binaries:
@@ -266,15 +270,15 @@ jobs:
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          TAG: ${{ needs.resolve-metadata.outputs.tag }}
+          IMAGE_TAG: ${{ needs.resolve-metadata.outputs.image_tag }}
         run: |
           # For multi-arch images, the manifest list is what cosign signs.
           # The index digest is exposed in the Docker-Content-Digest header
           # by buildx imagetools inspect.
-          digest=$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${TAG}" 2>/dev/null | awk -F': ' '/^Digest:/ {print $2}' | head -1 | tr -d ' ')
+          digest=$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null | awk -F': ' '/^Digest:/ {print $2}' | head -1 | tr -d ' ')
           if [[ -z "$digest" ]]; then
             echo "Failed to extract digest; falling back to tag-based sign"
-            cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${TAG}"
+            cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
           else
             cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${digest}"
           fi
