@@ -45,7 +45,7 @@ jobs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       should_publish: ${{ steps.meta.outputs.should_publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -121,7 +121,7 @@ jobs:
     needs: resolve-metadata
     if: needs.resolve-metadata.outputs.should_publish == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: docker/setup-qemu-action@v4
@@ -192,7 +192,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -292,8 +292,8 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           name: release-binaries
           path: dist
@@ -341,7 +341,7 @@ jobs:
       contents: write
       packages: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-binaries
           path: dist
@@ -413,12 +413,12 @@ jobs:
     # Runs on real SemVer releases and on manual dispatches where a version is supplied.
     if: needs.resolve-metadata.outputs.should_publish == 'true' && needs.resolve-metadata.outputs.is_stable == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Extract version
         id: version
