@@ -3,7 +3,6 @@ module github.com/foxj77/autonomous-monitor
 go 1.26.0
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.14.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/twmb/franz-go v1.21.2

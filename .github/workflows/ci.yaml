@@ -39,15 +39,15 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - name: Install librdkafka headers
-        run: sudo apt-get update && sudo apt-get install -y librdkafka-dev pkg-config
       - name: go mod verify
         run: go mod verify
       - name: go vet
+        env:
+          CGO_ENABLED: "0"
         run: go vet ./...
       - name: go test
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
         run: |
           go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
           go tool cover -func=coverage.out | tail -1
@@ -58,11 +58,6 @@ jobs:
           path: coverage.out
           retention-days: 7
 
-  # Native host-arch build smoke test. Multi-arch (linux/amd64 + linux/arm64)
-  # container images and binaries are produced by the release workflow using
-  # Docker buildx + QEMU, which handles the CGO cross-compile correctly. A
-  # raw go-cross-compile on an amd64 runner cannot build the arm64 C runtime
-  # for confluent-kafka-go, so we do not attempt it here.
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -73,14 +68,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - name: Install librdkafka headers
-        run: sudo apt-get update && sudo apt-get install -y librdkafka-dev pkg-config
       - name: Build
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -tags musl -trimpath -ldflags "-s -w" -o "dist/autonomous-monitor" .
+          go build -trimpath -ldflags "-s -w" -o "dist/autonomous-monitor" .
           chmod +x "dist/autonomous-monitor"
           "dist/autonomous-monitor" 2>&1 | head -3 || true
       - name: Upload binary
@@ -90,50 +83,6 @@ jobs:
           path: dist/autonomous-monitor
           retention-days: 7
           if-no-files-found: error
-
-  # Pure-Go (CGO-free) build path. Exercises the kafka_pure build tag,
-  # which swaps confluent-kafka-go for twmb/franz-go. No librdkafka
-  # required. This is the contributor-friendly build path documented in
-  # CONTRIBUTING.md and the recommended default for fresh checkouts.
-  build-pure:
-    name: Build (pure Go)
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: Build
-        run: |
-          mkdir -p dist
-          go build -tags 'musl kafka_pure' -trimpath -ldflags "-s -w" -o "dist/autonomous-monitor-pure" .
-          chmod +x "dist/autonomous-monitor-pure"
-          "dist/autonomous-monitor-pure" 2>&1 | head -3 || true
-      - name: Upload binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: binary-pure
-          path: dist/autonomous-monitor-pure
-          retention-days: 7
-          if-no-files-found: error
-
-  # Run the test suite under the kafka_pure build tag too. This catches
-  # any code that accidentally imports confluent-kafka-go outside the
-  # build-tag-guarded file.
-  test-pure:
-    name: Test (pure Go)
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      - name: go test
-        run: go test -race -count=1 ./...
 
   # Helm chart lint + render assertions. Catches template errors and
   # schema violations on every PR. The release workflow has its own

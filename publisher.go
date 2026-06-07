@@ -1,20 +1,18 @@
-// Package main — Kafka publisher interface.
+// Package main — Kafka publisher backed by twmb/franz-go (pure Go, no CGO).
 //
-// Two implementations live next to this file:
-//
-//   - publisher_confluent.go (default, //go:build !kafka_pure):
-//     confluent-kafka-go/v2, requires CGO and librdkafka at build time.
-//
-//   - publisher_pure.go       (//go:build kafka_pure):
-//     twmb/franz-go, pure Go, no CGO. Slightly fewer knobs but identical
-//     delivery-confirmation semantics from the caller's perspective.
-//
-// main.go and the monitor both depend on the Publisher interface below
-// and never reference either concrete client directly, so swapping the
-// build tag does not change observable behaviour.
+// main.go and the monitor depend only on the Publisher interface below
+// and never reference the concrete client directly.
 package main
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
+)
 
 // Publisher is the contract every Kafka backend must satisfy. The monitor
 // only ever calls PublishFinding and Close. New backends should preserve
@@ -24,4 +22,93 @@ import "context"
 type Publisher interface {
 	PublishFinding(context.Context, Finding) error
 	Close()
+}
+
+// KafkaPublisher publishes findings using a franz-go client. deliveryTimeout
+// bounds the per-publish wait for broker delivery confirmation; on
+// expiry, PublishFinding returns a context.DeadlineExceeded-wrapped
+// error.
+type KafkaPublisher struct {
+	client          *kgo.Client
+	topic           string
+	deliveryTimeout time.Duration
+}
+
+// NewKafkaPublisher constructs a KafkaPublisher for the given bootstrap
+// broker and topic. The client is configured with conservative
+// defaults: idempotent producer, AllISRAcks, and a 5ms record linger so
+// small bursts coalesce into a single request without adding tail
+// latency. Internal retries are capped at 10.
+func NewKafkaPublisher(broker, topic string, deliveryTimeout time.Duration) (*KafkaPublisher, error) {
+	if broker == "" {
+		return nil, errors.New("kafka: empty broker address")
+	}
+	if topic == "" {
+		return nil, errors.New("kafka: empty topic name")
+	}
+	if deliveryTimeout <= 0 {
+		deliveryTimeout = 10 * time.Second
+	}
+
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(broker),
+		kgo.DefaultProduceTopic(topic),
+		kgo.ProducerLinger(5*time.Millisecond),
+		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.RecordRetries(10),
+		kgo.ProducerBatchMaxBytes(1<<20),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("kafka client: %w", err)
+	}
+
+	return &KafkaPublisher{
+		client:          client,
+		topic:           topic,
+		deliveryTimeout: deliveryTimeout,
+	}, nil
+}
+
+// PublishFinding marshals the finding and blocks on ProduceSync until
+// the broker acknowledges the record. The caller's context is layered
+// with the publisher's delivery timeout so either cancellation source
+// is respected.
+func (p *KafkaPublisher) PublishFinding(ctx context.Context, finding Finding) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if p.deliveryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.deliveryTimeout)
+		defer cancel()
+	}
+
+	data, err := json.Marshal(finding)
+	if err != nil {
+		return err
+	}
+
+	record := &kgo.Record{
+		Topic: p.topic,
+		Key:   []byte(finding.ID),
+		Value: data,
+	}
+
+	res := p.client.ProduceSync(ctx, record)
+	if err := res.FirstErr(); err != nil {
+		return fmt.Errorf("deliver finding %s to %s: %w", finding.ID, p.topic, err)
+	}
+	return nil
+}
+
+// Close flushes pending records and shuts down the underlying client.
+// Safe to call on a nil receiver.
+func (p *KafkaPublisher) Close() {
+	if p == nil || p.client == nil {
+		return
+	}
+	flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = p.client.Flush(flushCtx)
+	p.client.Close()
 }

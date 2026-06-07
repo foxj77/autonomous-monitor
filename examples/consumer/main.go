@@ -1,7 +1,6 @@
 // Standalone consumer for the autonomous-monitor quickstart. Reads
 // Findings from Kafka and prints them as a single human-readable line
-// per record. Uses the pure-Go franz-go client so the container has
-// no CGO or librdkafka dependency.
+// per record. Uses the pure-Go franz-go client — no CGO required.
 //
 // Build:
 //   CGO_ENABLED=0 go build -o consumer .

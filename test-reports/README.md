@@ -16,9 +16,9 @@ roughly:
 - 3 state-store tests (`state_test.go`) — load/save/conflict-retry
 - 2 docs-contract tests (`docs_contract_test.go`) — guards the README
   against drift in metric names and config var names
-- 4 publisher tests (`publisher_test.go`, `publisher_pure_test.go`) —
+- 4 publisher tests (`publisher_test.go`) —
   interface contract, Finding JSON contract, and an in-process broker
-  round-trip for the pure-Go Kafka backend
+  round-trip using the franz-go kfake backend
 
 ## How to read this report
 
@@ -34,31 +34,19 @@ Captured on **2026-06-04T20:46:37Z** against commit
 **`b7b196d4abf2b4107012dbed07479e6968d0cdef`** on a **darwin/arm64**
 host running **go1.26.3**.
 
-### Default build (`confluent-kafka-go`)
+> Note: evidence files below were captured before the refactor to a
+> single pure-Go publisher. The split `-default`/`-pure` naming is
+> historical; both sets cover the same code path now.
 
 | Metric | Value |
 |---|---|
-| Top-level tests | **64** |
-| Pass / Fail / Skip | **64 / 0 / 0** |
-| Total leaf-test runtime | **0.20s** |
-| Average leaf-test runtime | **3.1ms** |
-| Slowest test | `TestPollTimesOutSlowCheck` (200ms — intentionally sleeps to exercise the check-timeout path) |
-| Statement coverage | **69.2%** |
-| `golangci-lint run` | **0 issues** |
-
-### Pure build (`twmb/franz-go`, build tag `kafka_pure`)
-
-| Metric | Value |
-|---|---|
-| Top-level tests | **66** (adds 2 round-trip tests for the franz-go backend) |
+| Top-level tests | **66** |
 | Pass / Fail / Skip | **66 / 0 / 0** |
 | Total leaf-test runtime | **0.22s** |
 | Average leaf-test runtime | **3.3ms** |
-| Statement coverage | **72.1%** (the franz-go `publisher_pure.go` is now exercised by the kfake round-trip tests) |
-| `golangci-lint run --build-tags kafka_pure` | **0 issues** |
-
-Both build paths are exercised in CI on every push and pull request.
-A merge that breaks either path blocks the release pipeline.
+| Slowest test | `TestPollTimesOutSlowCheck` (200ms — intentionally sleeps to exercise the check-timeout path) |
+| Statement coverage | **72.1%** |
+| `golangci-lint run` | **0 issues** |
 
 ## Test catalogue
 
@@ -187,18 +175,16 @@ the documentation can never silently drift.
 
 ### Publisher
 
-The Publisher contract is split across two files. The hermetic tests
-in `publisher_test.go` run under every build tag; the `kfake`-backed
-round-trip tests in `publisher_pure_test.go` are guarded behind
-`-tags kafka_pure` because the default backend can't easily run
-without a real broker.
+All publisher tests live in `publisher_test.go` and run unconditionally
+(no build tags). The franz-go kfake package provides an in-process broker
+for the round-trip tests.
 
 | Test | Location | Purpose | Expected | Result |
 |---|---|---|---|---|
-| `TestPublisherInterfaceContract` | `publisher_test.go:29` | Compile-time + reflection check: the `Publisher` interface declares exactly `PublishFinding(context.Context, Finding) error` and `Close()`, and the test's `recordingPublisher` (the one monitor tests use) implements it. | `reflect.TypeOf(recordingPublisher).Implements(publisherInterfaceType)` is true. | **PASS** |
-| `TestFindingMarshalRoundTrip` | `publisher_test.go:41` | See catalogue under `finding.go` above. | (same) | **PASS** |
-| `TestKafkaPublisherRoundTripPure` | `publisher_pure_test.go:19` | End-to-end: build a finding, publish it through the pure-Go Kafka publisher, consume it back with a fresh franz-go client against an in-process `kfake` cluster, and assert the bytes round-trip. | 1 record on the topic; `ID`, `Score`, and `Classification` match what was sent. | **PASS** (pure build only) |
-| `TestKafkaPublisherReportsDeliveryTimeout` | `publisher_pure_test.go:96` | With a 1ms delivery timeout against a real (kfake) broker and a context that allows 200ms, the publisher still surfaces an error. Confirms the `PublishTimeout` knob is honoured and does not silently mask a broker outage. | `PublishFinding` returns a non-nil error. | **PASS** (pure build only) |
+| `TestPublisherInterfaceContract` | `publisher_test.go` | Compile-time + reflection check: the `Publisher` interface declares exactly `PublishFinding(context.Context, Finding) error` and `Close()`, and the test's `recordingPublisher` (the one monitor tests use) implements it. | `reflect.TypeOf(recordingPublisher).Implements(publisherInterfaceType)` is true. | **PASS** |
+| `TestFindingMarshalRoundTrip` | `publisher_test.go` | See catalogue under `finding.go` above. | (same) | **PASS** |
+| `TestKafkaPublisherRoundTrip` | `publisher_test.go` | End-to-end: build a finding, publish it through the Kafka publisher, consume it back with a fresh franz-go client against an in-process `kfake` cluster, and assert the bytes round-trip. | 1 record on the topic; `ID`, `Score`, and `Classification` match what was sent. | **PASS** |
+| `TestKafkaPublisherReportsDeliveryTimeout` | `publisher_test.go` | With a 1ms delivery timeout against a real (kfake) broker and a context that allows 200ms, the publisher still surfaces an error. Confirms the `PublishTimeout` knob is honoured and does not silently mask a broker outage. | `PublishFinding` returns a non-nil error. | **PASS** |
 
 ## Evidence
 
@@ -209,37 +195,33 @@ editor and audit the run.
 
 ### Raw test output
 
+> The evidence files use the historical `-default`/`-pure` naming convention
+> from before the refactor. Both capture the same single build path now.
+
 | File | Format | What's in it |
 |---|---|---|
-| [`evidence/test-default.txt`](./evidence/test-default.txt) | Human-readable verbose `go test` output for the default build (64 top-level tests, 0 failures). | Each `=== RUN` / `--- PASS` / `--- FAIL` line, the `ok` summary at the end. |
-| [`evidence/test-pure.txt`](./evidence/test-pure.txt) | Same, for `-tags kafka_pure` (66 top-level tests, 0 failures). | Same. |
-| [`evidence/test-default.json`](./evidence/test-default.json) | `go test -json` machine-readable stream for the default build. | One JSON object per test event (`run` / `output` / `pass` / `fail`). |
-| [`evidence/test-pure.json`](./evidence/test-pure.json) | Same, for `-tags kafka_pure`. | Same. |
-| [`evidence/summary-default.tsv`](./evidence/summary-default.tsv) | Tab-separated: `result   elapsed_seconds   test_name`, default build. | Filter with `awk -F'\t' '$1=="pass"' summary-default.tsv` to list passing tests with their timing. |
-| [`evidence/summary-pure.tsv`](./evidence/summary-pure.tsv) | Same, for `-tags kafka_pure`. | Same. |
+| [`evidence/test-default.txt`](./evidence/test-default.txt) | Human-readable verbose `go test` output (66 top-level tests, 0 failures). | Each `=== RUN` / `--- PASS` / `--- FAIL` line, the `ok` summary at the end. |
+| [`evidence/test-default.json`](./evidence/test-default.json) | `go test -json` machine-readable stream. | One JSON object per test event (`run` / `output` / `pass` / `fail`). |
+| [`evidence/summary-default.tsv`](./evidence/summary-default.tsv) | Tab-separated: `result   elapsed_seconds   test_name`. | Filter with `awk -F'\t' '$1=="pass"' summary-default.tsv` to list passing tests with their timing. |
 
 ### Coverage
 
 | File | Format | What's in it |
 |---|---|---|
-| [`evidence/coverage-default.out`](./evidence/coverage-default.out) | `go tool cover` profile (default build). | One record per statement; feed to `go tool cover -html=...` for an HTML report. |
-| [`evidence/coverage-default.txt`](./evidence/coverage-default.txt) | `go tool cover -func` output (default build). | Per-function coverage table; the trailing `total:` line is the headline number (69.2%). |
-| [`evidence/coverage-pure.out`](./evidence/coverage-pure.out) | Same, for `-tags kafka_pure`. | Same. |
-| [`evidence/coverage-pure.txt`](./evidence/coverage-pure.txt) | Same, for `-tags kafka_pure`. | Same. (72.1%) |
+| [`evidence/coverage-default.out`](./evidence/coverage-default.out) | `go tool cover` profile. | One record per statement; feed to `go tool cover -html=...` for an HTML report. |
+| [`evidence/coverage-default.txt`](./evidence/coverage-default.txt) | `go tool cover -func` output. | Per-function coverage table; the trailing `total:` line is the headline number. |
 
-The coverage gap is concentrated in the Kafka publisher backends
-(the confluent impl is exercised only by integration smoke tests, the
-franz-go impl by the kfake round-trip), the `metrics.go` Prometheus
-registration (covered indirectly), and the per-poll code paths that
-require a real Kubernetes client. The integration gap is the
-largest item in [`ROADMAP.md`](../ROADMAP.md) under "Pre-1.0.0 work".
+The coverage gap is concentrated in the Kafka publisher (exercised by
+the kfake round-trip tests), the `metrics.go` Prometheus registration
+(covered indirectly), and the per-poll code paths that require a real
+Kubernetes client. The integration gap is the largest item in
+[`ROADMAP.md`](../ROADMAP.md) under "Pre-1.0.0 work".
 
 ### Lint
 
 | File | What's in it |
 |---|---|
-| [`evidence/lint-default.txt`](./evidence/lint-default.txt) | `golangci-lint run` output for the default build. Contains the single line `0 issues.` |
-| [`evidence/lint-pure.txt`](./evidence/lint-pure.txt) | `golangci-lint run --build-tags kafka_pure` output. Same. |
+| [`evidence/lint-default.txt`](./evidence/lint-default.txt) | `golangci-lint run` output. Contains the single line `0 issues.` |
 
 The linter configuration (`.golangci.yml`) is committed and runs in
 CI as a gating step before tests.
@@ -247,25 +229,17 @@ CI as a gating step before tests.
 ## How to reproduce this report
 
 ```bash
-# 1. Run the default-build test suite, capture verbose + JSON output
-go test -race -count=1 -v             ./... > test-reports/evidence/test-default.txt 2>&1
-go test -race -count=1 -v -json        ./... > test-reports/evidence/test-default.json 2>&1
-CGO_ENABLED=1 go test -race -count=1 -coverprofile=test-reports/evidence/coverage-default.out ./...
+# Run the test suite, capture verbose + JSON output
+CGO_ENABLED=0 go test -race -count=1 -v      ./... > test-reports/evidence/test-default.txt 2>&1
+CGO_ENABLED=0 go test -race -count=1 -v -json ./... > test-reports/evidence/test-default.json 2>&1
+CGO_ENABLED=0 go test -race -count=1 -coverprofile=test-reports/evidence/coverage-default.out ./...
 go tool cover -func=test-reports/evidence/coverage-default.out > test-reports/evidence/coverage-default.txt
 
-# 2. Same, for the pure-Go Kafka build path
-go test -race -count=1 -v             -tags 'kafka_pure' ./... > test-reports/evidence/test-pure.txt 2>&1
-go test -race -count=1 -v -json        -tags 'kafka_pure' ./... > test-reports/evidence/test-pure.json 2>&1
-go test -race -count=1 -tags 'kafka_pure' -coverprofile=test-reports/evidence/coverage-pure.out ./...
-go tool cover -func=test-reports/evidence/coverage-pure.out > test-reports/evidence/coverage-pure.txt
+# Lint
+golangci-lint run > test-reports/evidence/lint-default.txt 2>&1
 
-# 3. Lint both paths
-golangci-lint run                                > test-reports/evidence/lint-default.txt 2>&1
-golangci-lint run --build-tags kafka_pure        > test-reports/evidence/lint-pure.txt 2>&1
-
-# 4. Regenerate the summary TSV files
+# Regenerate the summary TSV
 jq -r 'select((.Action=="pass" or .Action=="fail" or .Action=="skip") and (.Test | type == "string") and (.Test | contains("/") | not)) | "\(.Action)\t\(.Elapsed // 0)\t\(.Test)"' test-reports/evidence/test-default.json > test-reports/evidence/summary-default.tsv
-jq -r 'select((.Action=="pass" or .Action=="fail" or .Action=="skip") and (.Test | type == "string") and (.Test | contains("/") | not)) | "\(.Action)\t\(.Elapsed // 0)\t\(.Test)"' test-reports/evidence/test-pure.json   > test-reports/evidence/summary-pure.tsv
 ```
 
 The script writes over the previous evidence; check the resulting

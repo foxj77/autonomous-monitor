@@ -54,14 +54,13 @@ The image is multi-arch (`linux/amd64`, `linux/arm64`).
 go install github.com/foxj77/autonomous-monitor@latest
 ```
 
-The build has two variants:
+The binary is pure Go — no CGO, no `librdkafka`, no C toolchain required:
 
-| Variant | Build command | When to use |
-|---|---|---|
-| **Default** (production) | `CGO_ENABLED=1 go build -tags musl -o autonomous-monitor .` | Released images. Uses `confluent-kafka-go/v2` with `librdkafka` for the richest producer callbacks. |
-| **Pure Go** (developer) | `go build -tags 'musl kafka_pure' -o autonomous-monitor .` | No CGO, no `librdkafka`. Uses `twmb/franz-go` for the same delivery-confirmation contract. Use this if you don't have a C toolchain. |
+```bash
+CGO_ENABLED=0 go build -o autonomous-monitor .
+```
 
-The default build requires `librdkafka-dev` (the binary links against `confluent-kafka-go`). See `Dockerfile` for the reference build environment. See `Dockerfile.pure` for the no-CGO build.
+See `Dockerfile` for the reference build environment.
 
 ### Try it locally (no cluster required)
 
@@ -296,10 +295,10 @@ go test -race -count=1 ./...
 golangci-lint run
 
 # build the binary
-CGO_ENABLED=1 go build -tags musl -o autonomous-monitor .
+CGO_ENABLED=0 go build -o autonomous-monitor .
 ```
 
-A reference build environment is in the `Dockerfile` (`golang:1.23-alpine` with `librdkafka-dev`).
+A reference build environment is in the `Dockerfile` (`golang:1.26-alpine`).
 
 ## Releasing
 
