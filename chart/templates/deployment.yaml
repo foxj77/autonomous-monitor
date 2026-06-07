@@ -141,6 +141,13 @@ spec:
             - name: HEALTH_MAX_POLL_GAP
               value: {{ .Values.health.maxPollGap | quote }}
             {{- end }}
+            {{- if .Values.runtime.goMemLimit }}
+            # Soft heap limit for the Go GC. Keep it below resources.limits.memory
+            # (~90%) so the GC reclaims aggressively before the kernel OOM-kills
+            # the pod. The Go runtime does not read the cgroup memory limit.
+            - name: GOMEMLIMIT
+              value: {{ .Values.runtime.goMemLimit | quote }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

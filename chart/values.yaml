@@ -75,6 +75,16 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+# ── Go runtime tuning ──────────────────────────────────────────────────
+# goMemLimit sets GOMEMLIMIT, a soft heap ceiling for the Go garbage
+# collector. The Go runtime does NOT read the cgroup memory limit, so
+# without this a transient spike can push the heap past resources.limits.memory
+# and the kernel OOM-kills the pod. Keep it at roughly 90% of
+# resources.limits.memory to leave headroom for non-heap memory (goroutine
+# stacks, the runtime itself). Set to "" to leave GOMEMLIMIT unset.
+runtime:
+  goMemLimit: 115MiB
+
 # Liveness probe hits /healthz, which returns 503 if the poll loop has not
 # completed a poll within the allowed gap (default: max(3*pollInterval,
 # pollInterval+checkTimeout)). Readiness probe hits /readyz, which returns 503

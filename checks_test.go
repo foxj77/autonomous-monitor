@@ -496,6 +496,7 @@ func TestCheckEventsEmitsWarningFinding(t *testing.T) {
 	client := fake.NewSimpleClientset(ev)
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	monitor.cfg.EventLookback = 30 * time.Minute
+	monitor.cfg.Checks.Events = true // buildSnapshot only lists resources enabled checks consume
 
 	result := monitor.checkEvents(ctx, monitor.buildSnapshot(ctx, now))
 	if len(result.findings) != 1 {
@@ -528,6 +529,7 @@ func TestCheckEventsSkipsEventsOutsideLookback(t *testing.T) {
 	client := fake.NewSimpleClientset(ev)
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	monitor.cfg.EventLookback = 30 * time.Minute
+	monitor.cfg.Checks.Events = true // buildSnapshot only lists resources enabled checks consume
 
 	result := monitor.checkEvents(ctx, monitor.buildSnapshot(ctx, now))
 	if len(result.findings) != 0 {

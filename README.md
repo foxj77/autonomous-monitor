@@ -236,6 +236,22 @@ All configuration is environment-driven.
 | `CHECK_SERVICES_ENABLED` | `true` | Service selector and LoadBalancer checks |
 | `CHECK_PVCS_ENABLED` | `true` | PVC phase and condition checks |
 
+## Runtime tuning
+
+These are standard Go runtime environment variables (not read by the monitor's
+own config), set in the Helm chart and `manifest/base`:
+
+- `GOMEMLIMIT` — soft heap ceiling for the Go garbage collector. The Go runtime
+  does **not** read the cgroup memory limit, so without this a transient spike
+  can push the heap past `resources.limits.memory` and the kernel OOM-kills the
+  pod. The chart sets it via `runtime.goMemLimit` (default `115MiB`); keep it at
+  roughly 90% of `resources.limits.memory` to leave headroom for non-heap memory.
+- `GOMAXPROCS` — left to the runtime. Go 1.25+ reads the cgroup CPU quota, so
+  with `resources.limits.cpu: 100m` it automatically settles at `1`.
+
+See [docs/improvements.md](./docs/improvements.md) for the ongoing
+resource-usage backlog.
+
 ## Output contract
 
 The monitor publishes a JSON `Finding` for every state change (new finding, score change, classification change, resolved). A finding looks like:

@@ -58,6 +58,7 @@ The most commonly customised values:
 | `customResources.rbacRules` | Extend the Role with namespaced reads for specific CRDs. |
 | `networkPolicy.ingress.metrics.from` | Restrict the metrics port to a `podSelector`/`namespaceSelector`. |
 | `health.maxPollGap` | Override the default liveness gap formula (`max(3*pollInterval, pollInterval+checkTimeout)`). Example: `"5m"`. |
+| `runtime.goMemLimit` | `GOMEMLIMIT` soft heap ceiling for the Go GC (default `115MiB`, ~90% of `resources.limits.memory`). Set `""` to leave it unset. |
 
 ## Examples
 

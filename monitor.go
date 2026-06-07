@@ -483,11 +483,11 @@ func (m *Monitor) currentStateBytes() (int, error) {
 	return len(data), nil
 }
 
+// updateStateMetrics refreshes the cheap count gauges every poll. It does NOT
+// serialize the state: the state_bytes gauge is set in maybeSave from the size
+// computed for the write, so it updates at write cadence instead of forcing a
+// full json.Marshal of the entire state on every poll (including idle polls).
 func (m *Monitor) updateStateMetrics() {
-	size, err := m.currentStateBytes()
-	if err == nil {
-		stateBytes.WithLabelValues(m.cfg.Namespace).Set(float64(size))
-	}
 	stateFindings.WithLabelValues(m.cfg.Namespace).Set(float64(len(m.state.Findings)))
 	stateObservations.WithLabelValues(m.cfg.Namespace).Set(float64(len(m.state.Observations)))
 }

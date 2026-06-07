@@ -103,37 +103,61 @@ func (m *Monitor) buildSnapshot(ctx context.Context, now time.Time) *snapshot {
 // listSnapshot performs the live List calls and records results into snap. It
 // must never touch m.state so that an abandoned (timed-out) invocation cannot
 // race the main goroutine.
+//
+// Each resource is listed only when at least one enabled check consumes it, so
+// disabling checks proportionally reduces per-poll API calls and decode work.
+// An enabled check always triggers its List, so the *OK flags still reflect a
+// real success/failure and the complete:false-on-list-error behavior is intact.
 func (m *Monitor) listSnapshot(ctx context.Context, snap *snapshot) {
-	if pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.pods = pods.Items
-		snap.podsOK = true
+	c := m.cfg.Checks
+
+	// Pods feed the pod-health, resource-spec, services (selector matching),
+	// logs and resource-usage checks.
+	if c.Pods || c.ResourceSpecs || c.Services || c.Logs || c.ResourceUsage {
+		if pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.pods = pods.Items
+			snap.podsOK = true
+		}
 	}
-	if events, err := m.kube.CoreV1().Events(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.events = events.Items
-		snap.eventsOK = true
+	if c.Events {
+		// Filter to Warning events server-side to shed the (often large) payload
+		// of Normal events. checkEvents still re-checks the type in memory, so
+		// fakes that ignore field selectors stay correct.
+		if events, err := m.kube.CoreV1().Events(m.cfg.Namespace).List(ctx, metav1.ListOptions{FieldSelector: "type=Warning"}); err == nil {
+			snap.events = events.Items
+			snap.eventsOK = true
+		}
 	}
-	if deployments, err := m.kube.AppsV1().Deployments(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.deployments = deployments.Items
-		snap.deploymentsOK = true
+	if c.Workloads {
+		if deployments, err := m.kube.AppsV1().Deployments(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.deployments = deployments.Items
+			snap.deploymentsOK = true
+		}
+		if statefulSets, err := m.kube.AppsV1().StatefulSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.statefulSets = statefulSets.Items
+			snap.statefulSetsOK = true
+		}
+		if daemonSets, err := m.kube.AppsV1().DaemonSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.daemonSets = daemonSets.Items
+			snap.daemonSetsOK = true
+		}
 	}
-	if statefulSets, err := m.kube.AppsV1().StatefulSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.statefulSets = statefulSets.Items
-		snap.statefulSetsOK = true
+	if c.Services {
+		if services, err := m.kube.CoreV1().Services(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.services = services.Items
+			snap.servicesOK = true
+		}
 	}
-	if daemonSets, err := m.kube.AppsV1().DaemonSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.daemonSets = daemonSets.Items
-		snap.daemonSetsOK = true
+	if c.PVCs {
+		if pvcs, err := m.kube.CoreV1().PersistentVolumeClaims(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.pvcs = pvcs.Items
+			snap.pvcsOK = true
+		}
 	}
-	if services, err := m.kube.CoreV1().Services(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.services = services.Items
-		snap.servicesOK = true
-	}
-	if pvcs, err := m.kube.CoreV1().PersistentVolumeClaims(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.pvcs = pvcs.Items
-		snap.pvcsOK = true
-	}
-	if hpas, err := m.kube.AutoscalingV2().HorizontalPodAutoscalers(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
-		snap.hpas = hpas.Items
-		snap.hpasOK = true
+	if c.Scaling {
+		if hpas, err := m.kube.AutoscalingV2().HorizontalPodAutoscalers(m.cfg.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			snap.hpas = hpas.Items
+			snap.hpasOK = true
+		}
 	}
 }
