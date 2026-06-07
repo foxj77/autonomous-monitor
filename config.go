@@ -51,6 +51,10 @@ type Config struct {
 	CustomResourceAllowlist      []string
 	CustomResourceExcludelist    []string
 	CustomResourceDiscoveryTTL   time.Duration
+	// HealthMaxPollGap is the maximum allowed duration between completed polls
+	// before /healthz returns 503. When zero, the default formula is used:
+	// max(3 * PollInterval, PollInterval + CheckTimeout).
+	HealthMaxPollGap             time.Duration
 	Checks                       CheckConfig
 }
 
@@ -91,6 +95,7 @@ func LoadConfig() Config {
 		CustomResourceAllowlist:    listEnv("CUSTOM_RESOURCE_ALLOWLIST", "CUSTOM_RESOURCE_GROUPS"),
 		CustomResourceExcludelist:  listEnv("CUSTOM_RESOURCE_EXCLUDELIST", "CUSTOM_RESOURCE_EXCLUDE_GROUPS"),
 		CustomResourceDiscoveryTTL: durationEnv("CUSTOM_RESOURCE_DISCOVERY_TTL", 10*time.Minute),
+		HealthMaxPollGap:           durationEnv("HEALTH_MAX_POLL_GAP", 0),
 		Checks: CheckConfig{
 			Pods:           boolEnvDefaultOn("CHECK_PODS_ENABLED"),
 			Events:         boolEnvDefaultOn("CHECK_EVENTS_ENABLED"),

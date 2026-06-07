@@ -137,9 +137,13 @@ spec:
             {{- end }}
             - name: CUSTOM_RESOURCE_DISCOVERY_TTL
               value: {{ .Values.customResources.discoveryTTL | quote }}
+            {{- if .Values.health.maxPollGap }}
+            - name: HEALTH_MAX_POLL_GAP
+              value: {{ .Values.health.maxPollGap | quote }}
+            {{- end }}
           livenessProbe:
             httpGet:
-              path: /metrics
+              path: /healthz
               port: metrics
             initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
@@ -147,7 +151,7 @@ spec:
             failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
           readinessProbe:
             httpGet:
-              path: /metrics
+              path: /readyz
               port: metrics
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}

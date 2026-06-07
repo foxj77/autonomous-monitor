@@ -75,9 +75,11 @@ resources:
     cpu: 100m
     memory: 128Mi
 
-# Probes hit /metrics which is always serving. The monitor has no
-# separate health endpoint because liveness and readiness reduce to the
-# same question: is the metrics port open?
+# Liveness probe hits /healthz, which returns 503 if the poll loop has not
+# completed a poll within the allowed gap (default: max(3*pollInterval,
+# pollInterval+checkTimeout)). Readiness probe hits /readyz, which returns 503
+# until the first poll has completed. initialDelaySeconds on liveness must be
+# large enough to cover at least one full poll before Kubernetes starts checking.
 livenessProbe:
   initialDelaySeconds: 30
   periodSeconds: 30
@@ -179,6 +181,14 @@ downstreamTriage:
   minScore: 60
   cooldown: 30m
   cooldownIncident: 10m
+
+# ── Health endpoint ────────────────────────────────────────────────────
+# Controls the /healthz and /readyz endpoints.
+# maxPollGap: overrides the default formula max(3*pollInterval,
+#   pollInterval+checkTimeout) used to decide when /healthz returns 503.
+#   Leave empty to use the default. Example: "5m".
+health:
+  maxPollGap: ""
 
 # ── Suppression ConfigMap ──────────────────────────────────────────────
 # If set, the monitor reads this ConfigMap from the watch namespace

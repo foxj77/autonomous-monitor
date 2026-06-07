@@ -154,6 +154,12 @@
         "cooldownIncident": { "type": "string" }
       }
     },
+    "health": {
+      "type": "object",
+      "properties": {
+        "maxPollGap": { "type": "string" }
+      }
+    },
     "suppression": {
       "type": "object",
       "properties": {

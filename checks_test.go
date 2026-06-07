@@ -892,7 +892,7 @@ func newTestMonitor(client *fake.Clientset, metricsClient *metricsfake.Clientset
 	cfg := testConfig(namespace)
 	store := NewStateStore(client, namespace, "autonomous-monitor-state")
 	state := newMonitorState(namespace)
-	return NewMonitor(cfg, client, metricsClient, dyn, &recordingPublisher{}, store, state)
+	return NewMonitor(cfg, client, metricsClient, dyn, &recordingPublisher{}, store, state, nil)
 }
 
 func disableAllExcept(m *Monitor, active string) {

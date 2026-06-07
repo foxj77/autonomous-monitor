@@ -36,6 +36,7 @@ One monitor per namespace. No cluster-wide permissions. No port forwarding. No e
 - **Suppression**: optional `ConfigMap` keyed by `kind/name/reason` with `*` wildcards
 - **AI cooldowns**: throttle expensive downstream AI calls per finding and per severity band
 - **Prometheus metrics** on `:8080/metrics`
+- **Health endpoints**: `/healthz` (liveness — 503 when the poll loop is wedged) and `/readyz` (readiness — 503 until the first poll completes)
 - **Generic CRD discovery** — no hardcoded group/version lists
 
 ## Install
@@ -224,6 +225,7 @@ All configuration is environment-driven.
 | `CUSTOM_RESOURCE_GROUPS` | _(unset)_ | Alias for `CUSTOM_RESOURCE_ALLOWLIST` |
 | `CUSTOM_RESOURCE_EXCLUDE_GROUPS` | _(unset)_ | Alias for `CUSTOM_RESOURCE_EXCLUDELIST` |
 | `CUSTOM_RESOURCE_DISCOVERY_TTL` | `10m` | How long to cache API discovery results for custom resource scanning |
+| `HEALTH_MAX_POLL_GAP` | _(formula)_ | Maximum duration between completed polls before `/healthz` returns 503. Defaults to `max(3 * POLL_INTERVAL, POLL_INTERVAL + CHECK_TIMEOUT)`. |
 | `CHECK_PODS_ENABLED` | `true` | Toggle individual check families |
 | `CHECK_EVENTS_ENABLED` | `true` | |
 | `CHECK_LOGS_ENABLED` | `true` | |
@@ -266,6 +268,17 @@ The monitor publishes a JSON `Finding` for every state change (new finding, scor
 The `id` is deterministic. A consumer can use it to deduplicate across re-emits, restarts, and re-deploys.
 
 Resolution events (status: `resolved`) are emitted when a previously-ongoing finding no longer appears in a poll cycle.
+
+## Health endpoints
+
+The monitor exposes two health endpoints on `METRICS_PORT` (default `8080`):
+
+| Endpoint | Purpose | Behavior |
+|---|---|---|
+| `/healthz` | Liveness | Returns `200 ok` while the poll loop is completing polls within the allowed gap. Returns `503` if no poll has completed within `HEALTH_MAX_POLL_GAP` (default: `max(3 * POLL_INTERVAL, POLL_INTERVAL + CHECK_TIMEOUT)`). Before the first poll completes the process is still starting up and `/healthz` returns `200` — coordinate with `livenessProbe.initialDelaySeconds`. |
+| `/readyz` | Readiness | Returns `200 ok` once the first poll has completed (state loaded, first scan done). Returns `503` before that, preventing traffic from reaching the pod during initial startup. |
+
+The Kubernetes probes in the chart and manifest point at these endpoints. The `livenessProbe.initialDelaySeconds` (default `30s`) must be large enough to cover at least one full poll cycle before Kubernetes starts checking liveness.
 
 ## Metrics
 

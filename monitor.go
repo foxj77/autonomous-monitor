@@ -23,6 +23,7 @@ type Monitor struct {
 	publisher                      Publisher
 	store                          *StateStore
 	state                          *MonitorState
+	health                         *PollHealth
 	suppressions                   map[string]struct{} // loaded from SUPPRESS_CONFIGMAP each poll
 	dirty                          bool
 	lastWrite                      time.Time
@@ -30,7 +31,7 @@ type Monitor struct {
 	customResourceDiscoveryExpires time.Time
 }
 
-func NewMonitor(cfg Config, kube kubernetes.Interface, metricsClient metricsv1beta1client.Interface, dynClient dynamic.Interface, publisher Publisher, store *StateStore, state *MonitorState) *Monitor {
+func NewMonitor(cfg Config, kube kubernetes.Interface, metricsClient metricsv1beta1client.Interface, dynClient dynamic.Interface, publisher Publisher, store *StateStore, state *MonitorState, health *PollHealth) *Monitor {
 	return &Monitor{
 		cfg:       cfg,
 		kube:      kube,
@@ -39,6 +40,7 @@ func NewMonitor(cfg Config, kube kubernetes.Interface, metricsClient metricsv1be
 		publisher: publisher,
 		store:     store,
 		state:     state,
+		health:    health,
 	}
 }
 
@@ -115,6 +117,9 @@ func (m *Monitor) Poll(ctx context.Context) {
 	m.updateActiveMetrics(active)
 	m.maybeSave(ctx, now)
 	pollDuration.WithLabelValues(m.cfg.Namespace).Observe(time.Since(start).Seconds())
+	if m.health != nil {
+		m.health.MarkPollComplete()
+	}
 }
 
 func (m *Monitor) runCheck(ctx context.Context, name string, fn func(context.Context) checkResult) checkResult {
