@@ -49,61 +49,85 @@ func (m *Monitor) Poll(ctx context.Context) {
 	active := map[string]Finding{}
 	complete := true
 
+	// Build the shared snapshot once: every redundantly-listed resource is
+	// listed a single time here, on the main goroutine, and the prior
+	// observations checks depend on are value-copied. Checks read this snapshot
+	// and never touch m.state, so a timed-out (abandoned) check goroutine can
+	// never race the main goroutine's reads/writes of m.state.
+	snap := m.buildSnapshot(ctx, now)
+
 	if m.cfg.Checks.Pods {
 		result := m.runCheck(ctx, "pods", func(checkCtx context.Context) checkResult {
-			return m.checkPods(checkCtx, now)
+			return m.checkPods(checkCtx, snap)
 		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.ResourceSpecs {
-		result := m.runCheck(ctx, "resource-spec", m.checkResourceSpecs)
+		result := m.runCheck(ctx, "resource-spec", func(checkCtx context.Context) checkResult {
+			return m.checkResourceSpecs(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.Events {
 		result := m.runCheck(ctx, "events", func(checkCtx context.Context) checkResult {
-			return m.checkEvents(checkCtx, now)
+			return m.checkEvents(checkCtx, snap)
 		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.Workloads {
-		result := m.runCheck(ctx, "workloads", m.checkWorkloads)
+		result := m.runCheck(ctx, "workloads", func(checkCtx context.Context) checkResult {
+			return m.checkWorkloads(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.Services {
-		result := m.runCheck(ctx, "services", m.checkServices)
+		result := m.runCheck(ctx, "services", func(checkCtx context.Context) checkResult {
+			return m.checkServices(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.PVCs {
-		result := m.runCheck(ctx, "pvcs", m.checkPVCs)
+		result := m.runCheck(ctx, "pvcs", func(checkCtx context.Context) checkResult {
+			return m.checkPVCs(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.Scaling {
-		result := m.runCheck(ctx, "scaling", m.checkScaling)
+		result := m.runCheck(ctx, "scaling", func(checkCtx context.Context) checkResult {
+			return m.checkScaling(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.Logs {
-		result := m.runCheck(ctx, "logs", m.checkLogs)
+		result := m.runCheck(ctx, "logs", func(checkCtx context.Context) checkResult {
+			return m.checkLogs(checkCtx, snap)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.ResourceUsage {
 		result := m.runCheck(ctx, "resource-usage", func(checkCtx context.Context) checkResult {
-			return m.checkResourceUsage(checkCtx, now)
+			return m.checkResourceUsage(checkCtx, snap)
 		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 	if m.cfg.Checks.CustomResource {
-		result := m.runCheck(ctx, "custom-resources", m.checkCustomResources)
+		// Refresh discovery on the main goroutine so the discovery cache is
+		// never mutated from a check goroutine that may outlive the timeout.
+		apiLists, discoveryErr := m.customResourceAPILists()
+		result := m.runCheck(ctx, "custom-resources", func(checkCtx context.Context) checkResult {
+			return m.checkCustomResources(checkCtx, apiLists, discoveryErr)
+		})
 		complete = complete && result.complete
-		m.collectFindings(ctx, result.findings, now, active)
+		m.applyResult(ctx, result, now, active)
 	}
 
 	if complete {
@@ -147,6 +171,19 @@ func (m *Monitor) runCheck(ctx context.Context, name string, fn func(context.Con
 func (m *Monitor) recordCheckTimeout(name string) {
 	checksTotal.WithLabelValues(m.cfg.Namespace, name, "timeout").Inc()
 	log.Printf("ERROR: check timed out namespace=%s check=%s timeout=%s", m.cfg.Namespace, name, m.cfg.CheckTimeout)
+}
+
+// applyResult merges a completed check's observation deltas into m.state and
+// then collects its findings. This runs only on the main goroutine, after
+// runCheck has returned the result via its channel; the abandoned-goroutine
+// timeout path returns an empty checkResult, so its observations are dropped.
+func (m *Monitor) applyResult(ctx context.Context, result checkResult, now time.Time, active map[string]Finding) {
+	for key, obs := range result.observations {
+		copied := obs
+		m.state.Observations[key] = &copied
+		m.dirty = true
+	}
+	m.collectFindings(ctx, result.findings, now, active)
 }
 
 func (m *Monitor) collectFindings(ctx context.Context, findings []Finding, now time.Time, active map[string]Finding) {
