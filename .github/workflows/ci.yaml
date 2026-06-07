@@ -47,7 +47,9 @@ jobs:
         run: go vet ./...
       - name: go test
         env:
-          CGO_ENABLED: "0"
+          # The race detector requires cgo; the shipped binary is still built
+          # CGO_ENABLED=0 (see the build job) — only the test run needs a C toolchain.
+          CGO_ENABLED: "1"
         run: |
           go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
           go tool cover -func=coverage.out | tail -1
