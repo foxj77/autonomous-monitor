@@ -36,23 +36,15 @@ go test -race -count=1 ./...
 # lint
 golangci-lint run
 
-# build (requires librdkafka)
-CGO_ENABLED=1 go build -tags musl -o autonomous-monitor .
-
-# build the pure-Go variant (no CGO, no librdkafka)
-go build -tags 'musl kafka_pure' -o autonomous-monitor .
+# build (pure Go, no CGO required)
+CGO_ENABLED=0 go build -o autonomous-monitor .
 ```
 
-If you don't have `librdkafka` installed, you have two options:
+You can also build using the provided `Dockerfile`:
 
-1. Build the pure-Go variant with `-tags kafka_pure`. This swaps the
-   Kafka publisher to `twmb/franz-go`, which has zero CGO dependencies.
-   The Finding JSON contract and the rest of the binary are identical.
-2. Use the provided `Dockerfile` (default CGO build):
-
-   ```bash
-   docker build -t autonomous-monitor:dev .
-   ```
+```bash
+docker build -t autonomous-monitor:dev .
+```
 
 ## Lint configuration
 
@@ -78,22 +70,13 @@ Check families are plain methods on `*Monitor` in `checks.go`. Each returns a `c
 4. Add tests using the existing `newTestMonitor` helper in `checks_test.go`
 5. Document the new env var in the README
 
-## Swapping the Kafka publisher
+## Kafka publisher
 
-The default build links against `confluent-kafka-go/v2` (CGO +
-`librdkafka`). A pure-Go variant using `twmb/franz-go` is available
-behind the `kafka_pure` build tag:
-
-```bash
-go build -tags 'musl kafka_pure' -o autonomous-monitor .
-go test -tags 'kafka_pure' ./...
-```
-
-Both paths implement the `Publisher` interface in `publisher.go`.
-`main.go` calls `NewKafkaPublisher(...)`; the implementation is selected
-at compile time by the `//go:build` tags on `publisher_confluent.go`
-and `publisher_pure.go`. New Kafka-related code should keep the
-interface stable and avoid leaking either client into call sites.
+The publisher is backed by `twmb/franz-go` (pure Go, no CGO). It lives
+in `publisher.go` and implements the `Publisher` interface. `main.go`
+calls `NewKafkaPublisher(...)`; no build tags are required. New
+Kafka-related code should keep the interface stable and avoid leaking
+the client into call sites.
 
 ## Release process
 

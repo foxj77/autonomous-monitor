@@ -24,10 +24,9 @@ changed only with a major version bump:
 
 ## Pre-1.0.0 work
 
-- [x] **Pure-Go Kafka build path** — `confluent-kafka-go` is the default
-      (delivers the richest producer callbacks) but a `kafka_pure` build
-      tag now enables `twmb/franz-go` so contributors without a C
-      toolchain can `go build` and `go test` on a fresh laptop.
+- [x] **Pure-Go Kafka publisher** — `twmb/franz-go` is the single Kafka
+      backend. No CGO, no `librdkafka`, no C toolchain required.
+      Contributors can `go build` and `go test` on a fresh laptop.
 - [x] **Honest naming** — `AI_TRIAGE_ENABLED` and friends are deprecated
       aliases for `DOWNSTREAM_TRIAGE_ENABLED` and friends. The monitor
       never calls a model itself; the new name reflects that. Legacy
@@ -51,12 +50,7 @@ changed only with a major version bump:
       single largest correctness gap. Tracked in
       [issue TBD](https://github.com/foxj77/autonomous-monitor/issues).
 - [x] **Publisher unit test** — the franz-go backend has a hermetic
-      round-trip test against an in-process `kfake` broker, gated behind
-      `-tags kafka_pure`. The confluent backend is exercised only by
-      integration smoke tests today.
-- [ ] **Lock the CGO install command in CI** — the CI installs
-      `librdkafka-dev` by name; pin the version and verify it matches
-      the alpine package version baked into the release image.
+      round-trip test against an in-process `kfake` broker.
 
 ## Post-1.0.0 scope (deferred)
 
