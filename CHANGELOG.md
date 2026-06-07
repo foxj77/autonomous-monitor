@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/foxj77/autonomous-monitor/compare/v0.2.1...v0.3.0) (2026-06-07)
+
+
+### Features
+
+* add /healthz and /readyz endpoints reflecting poll liveness ([6d42e2a](https://github.com/foxj77/autonomous-monitor/commit/6d42e2ab5a1ffc6173baf593b8f34dd8bb27fe00))
+
+
+### Bug Fixes
+
+* **ci:** run go test with CGO_ENABLED=1 so -race works ([38f47b0](https://github.com/foxj77/autonomous-monitor/commit/38f47b07cb6744d94d37604156e412dbc5b47be6))
+* eliminate poll-timeout data race and list shared resources once per poll ([7dd5c56](https://github.com/foxj77/autonomous-monitor/commit/7dd5c56b82e7821b6f1d0fa5323c17940e902784))
+
+
+### Refactors
+
+* drop CGO confluent-kafka-go path, franz-go is the only publisher ([f07c292](https://github.com/foxj77/autonomous-monitor/commit/f07c292b6e2d5def211877a466c1fa3a0e33435c))
+
 ## [0.2.1](https://github.com/foxj77/autonomous-monitor/compare/v0.2.0...v0.2.1) (2026-06-05)
 
 
