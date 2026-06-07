@@ -22,9 +22,14 @@ func main() {
 	cfg := LoadConfig()
 	log.Printf("starting autonomous monitor namespace=%s poll_interval=%s findings_topic=%s", cfg.Namespace, cfg.PollInterval, cfg.FindingsTopic)
 
+	health := NewPollHealth(EffectiveMaxPollGap(cfg))
+	log.Printf("health max_poll_gap=%s", health.maxGap)
+
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
+		mux.Handle("/healthz", LivezHandler(health))
+		mux.Handle("/readyz", ReadyzHandler(health))
 		srv := &http.Server{
 			Addr:              ":" + cfg.MetricsPort,
 			Handler:           mux,
@@ -79,7 +84,7 @@ func main() {
 		state = newMonitorState(cfg.Namespace)
 	}
 
-	monitor := NewMonitor(cfg, kube, metricsClient, dynClient, publisher, store, state)
+	monitor := NewMonitor(cfg, kube, metricsClient, dynClient, publisher, store, state, health)
 	monitor.Poll(ctx)
 
 	ticker := time.NewTicker(cfg.PollInterval)

@@ -38,7 +38,7 @@ func TestMonitorPublishesNotReadyFindingWithAIDispatchAndCooldown(t *testing.T) 
 		t.Fatalf("Load state: %v", err)
 	}
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 	if len(publisher.findings) != 1 {
@@ -66,7 +66,7 @@ func TestMonitorRetriesFailedFindingPublish(t *testing.T) {
 		t.Fatalf("Load state: %v", err)
 	}
 	publisher := &recordingPublisher{err: errors.New("broker down")}
-	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 	if len(publisher.findings) != 1 {
@@ -112,7 +112,7 @@ func TestMonitorPublishesResolvedFinding(t *testing.T) {
 		t.Fatalf("Load state: %v", err)
 	}
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 	if err := client.CoreV1().Pods("cert-manager").Delete(ctx, "cert-manager-webhook", metav1.DeleteOptions{}); err != nil {
@@ -137,7 +137,7 @@ func TestMonitorRetriesFailedResolvedPublish(t *testing.T) {
 		t.Fatalf("Load state: %v", err)
 	}
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(testConfig("cert-manager"), client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 	if err := client.CoreV1().Pods("cert-manager").Delete(ctx, "cert-manager-webhook", metav1.DeleteOptions{}); err != nil {
@@ -186,7 +186,7 @@ func TestResourceSpecsRunsWhenPodHealthDisabled(t *testing.T) {
 	cfg.Checks.Pods = false
 	cfg.Checks.ResourceSpecs = true
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 
@@ -270,7 +270,7 @@ func TestConfiguredChecksAreWiredIntoPoll(t *testing.T) {
 				t.Fatalf("unhandled check family %q", tc.active)
 			}
 			publisher := &recordingPublisher{}
-			monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+			monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state, nil)
 
 			monitor.Poll(context.Background())
 
@@ -304,7 +304,7 @@ func TestPollTimesOutSlowCheck(t *testing.T) {
 	cfg.Checks = CheckConfig{Pods: true}
 	cfg.CheckTimeout = 10 * time.Millisecond
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state, nil)
 
 	start := time.Now()
 	monitor.Poll(ctx)
@@ -365,7 +365,7 @@ func TestPollAbandonedSlowCheckDoesNotRaceState(t *testing.T) {
 	cfg.Checks = CheckConfig{Pods: true, ResourceSpecs: true}
 	cfg.CheckTimeout = 10 * time.Millisecond
 	cfg.StateWriteInterval = 0
-	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -418,7 +418,7 @@ func TestPollListsPodsOncePerPoll(t *testing.T) {
 	}
 	cfg := testConfig("ns1")
 	cfg.Checks = CheckConfig{Pods: true, ResourceSpecs: true, Logs: true, ResourceUsage: false}
-	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state, nil)
 
 	monitor.Poll(ctx)
 
@@ -451,7 +451,7 @@ func TestMonitorExpiresOldResolvedFindings(t *testing.T) {
 	cfg.ResolvedFindingRetention = time.Hour
 	cfg.Checks = CheckConfig{}
 	publisher := &recordingPublisher{}
-	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, publisher, store, state, nil)
 
 	monitor.Poll(ctx)
 
@@ -565,7 +565,7 @@ func TestMonitorRefusesOversizedStateAfterPruning(t *testing.T) {
 	}
 	cfg := testConfig("ns1")
 	cfg.MaxStateBytes = 64
-	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state, nil)
 	monitor.dirty = true
 
 	monitor.maybeSave(ctx, now)

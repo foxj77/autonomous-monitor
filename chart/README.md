@@ -21,7 +21,8 @@ For a single release:
 
 - `Deployment` (1 replica) — runs the monitor with the image, env vars,
   resources, probes, and security context described in
-  [`values.yaml`](./values.yaml).
+  [`values.yaml`](./values.yaml). The liveness probe hits `/healthz` (poll-loop
+  liveness) and the readiness probe hits `/readyz` (first-poll gate).
 - `Service` (ClusterIP) — exposes the Prometheus metrics port
   (`8080`).
 - `ServiceAccount` — namespaced; can be opted out via
@@ -56,6 +57,7 @@ The most commonly customised values:
 | `customResources.allowlist` / `excludelist` | Filter the API groups scanned via the dynamic client. |
 | `customResources.rbacRules` | Extend the Role with namespaced reads for specific CRDs. |
 | `networkPolicy.ingress.metrics.from` | Restrict the metrics port to a `podSelector`/`namespaceSelector`. |
+| `health.maxPollGap` | Override the default liveness gap formula (`max(3*pollInterval, pollInterval+checkTimeout)`). Example: `"5m"`. |
 
 ## Examples
 
