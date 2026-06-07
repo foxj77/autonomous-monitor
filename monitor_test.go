@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +325,105 @@ func TestPollTimesOutSlowCheck(t *testing.T) {
 	case <-checkDone:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for stalled check goroutine to exit")
+	}
+}
+
+// TestPollAbandonedSlowCheckDoesNotRaceState proves the poll-timeout data race
+// is gone. The pod list blocks well past CheckTimeout, so the listing goroutine
+// is abandoned and keeps running while the main goroutine proceeds to prune and
+// json.Marshal m.state. Before the fix, an abandoned check goroutine wrote
+// m.state.Observations concurrently with that marshal, a concurrent map access
+// that the race detector flags. With the fix the goroutine only writes a
+// discarded snapshot, so this test passes cleanly under -race and the
+// pre-existing state is left intact.
+func TestPollAbandonedSlowCheckDoesNotRaceState(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	released := make(chan struct{})
+	client.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		// Block past CheckTimeout so the listing goroutine is abandoned while
+		// the main goroutine continues into prune/marshal of m.state.
+		<-released
+		return true, &corev1.PodList{Items: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Name: "late", Namespace: "ns1"},
+		}}}, nil
+	})
+
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	now := time.Now().UTC()
+	// Seed observations and findings so the post-check prune/marshal touches
+	// the same maps an abandoned check goroutine would have written.
+	state.Observations["pod/late/restarts"] = &Observation{RestartCount: 1, LastSeen: now}
+	state.Observations["pod/seed/memory"] = &Observation{MemorySamplesPct: []int64{10, 20, 30}, LastSeen: now}
+	state.Findings["seed"] = &FindingState{Kind: "Pod", Name: "seed", Check: "pod-health", Reason: "not-ready", Status: "ongoing", FirstSeen: now, LastSeen: now}
+
+	cfg := testConfig("ns1")
+	cfg.Checks = CheckConfig{Pods: true, ResourceSpecs: true}
+	cfg.CheckTimeout = 10 * time.Millisecond
+	cfg.StateWriteInterval = 0
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+
+	done := make(chan struct{})
+	go func() {
+		monitor.Poll(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Poll did not return within the timeout budget")
+	}
+
+	// Pre-existing state must be intact: the abandoned check contributed nothing.
+	if obs, ok := monitor.state.Observations["pod/late/restarts"]; !ok || obs.RestartCount != 1 {
+		t.Fatalf("seed restart observation corrupted: %+v", monitor.state.Observations["pod/late/restarts"])
+	}
+	if _, ok := monitor.state.Findings["seed"]; !ok {
+		t.Fatal("seed finding should remain after a poll whose checks all timed out")
+	}
+
+	// Let the abandoned listing goroutine finish; it must not touch m.state.
+	close(released)
+	time.Sleep(20 * time.Millisecond)
+	if _, err := monitor.currentStateBytes(); err != nil {
+		t.Fatalf("state should still marshal cleanly: %v", err)
+	}
+}
+
+// TestPollListsPodsOncePerPoll asserts the fetch-once-per-poll behavior: with
+// pods, resource-spec, logs and resource-usage all enabled (each of which used
+// to list pods independently), a single Poll issues exactly one pods List.
+func TestPollListsPodsOncePerPoll(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "ns1"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	})
+	var podListCount int32
+	client.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.AddInt32(&podListCount, 1)
+		return false, nil, nil // fall through to the tracker's default list
+	})
+
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	cfg := testConfig("ns1")
+	cfg.Checks = CheckConfig{Pods: true, ResourceSpecs: true, Logs: true, ResourceUsage: false}
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state)
+
+	monitor.Poll(ctx)
+
+	if got := atomic.LoadInt32(&podListCount); got != 1 {
+		t.Fatalf("pods List count = %d across one poll, want exactly 1", got)
 	}
 }
 

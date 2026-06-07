@@ -389,7 +389,7 @@ func TestCheckPodsReportsCrashLoopBackOff(t *testing.T) {
 	client := fake.NewSimpleClientset(pod)
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 
-	result := monitor.checkPods(ctx, now)
+	result := monitor.checkPods(ctx, monitor.buildSnapshot(ctx, now))
 	if !result.complete {
 		t.Fatal("check should be complete")
 	}
@@ -434,7 +434,7 @@ func TestCheckPodsReportsOOMKilled(t *testing.T) {
 	client := fake.NewSimpleClientset(pod)
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 
-	result := monitor.checkPods(ctx, now)
+	result := monitor.checkPods(ctx, monitor.buildSnapshot(ctx, now))
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -462,7 +462,7 @@ func TestCheckResourceSpecsReportsMissingRequests(t *testing.T) {
 	client := fake.NewSimpleClientset(pod)
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 
-	result := monitor.checkResourceSpecs(ctx)
+	result := monitor.checkResourceSpecs(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	reasons := map[string]bool{}
 	for _, f := range result.findings {
 		reasons[f.Reason] = true
@@ -497,7 +497,7 @@ func TestCheckEventsEmitsWarningFinding(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	monitor.cfg.EventLookback = 30 * time.Minute
 
-	result := monitor.checkEvents(ctx, now)
+	result := monitor.checkEvents(ctx, monitor.buildSnapshot(ctx, now))
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -529,7 +529,7 @@ func TestCheckEventsSkipsEventsOutsideLookback(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	monitor.cfg.EventLookback = 30 * time.Minute
 
-	result := monitor.checkEvents(ctx, now)
+	result := monitor.checkEvents(ctx, monitor.buildSnapshot(ctx, now))
 	if len(result.findings) != 0 {
 		t.Errorf("old event should be ignored, got %d findings", len(result.findings))
 	}
@@ -543,7 +543,7 @@ func TestCheckWorkloadsReportsStatefulSetBelowDesired(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "workloads")
 
-	result := monitor.checkWorkloads(ctx)
+	result := monitor.checkWorkloads(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -565,7 +565,7 @@ func TestCheckServicesReportsSelectorWithNoPods(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "services")
 
-	result := monitor.checkServices(ctx)
+	result := monitor.checkServices(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	if !result.complete {
 		t.Fatal("check should be complete")
 	}
@@ -597,7 +597,7 @@ func TestCheckServicesSkipsSelectorWithMatchingPod(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "services")
 
-	result := monitor.checkServices(ctx)
+	result := monitor.checkServices(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	if len(result.findings) != 0 {
 		t.Fatalf("expected no findings, got %+v", result.findings)
 	}
@@ -616,7 +616,7 @@ func TestCheckServicesReportsPendingLoadBalancer(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "services")
 
-	result := monitor.checkServices(ctx)
+	result := monitor.checkServices(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -639,7 +639,7 @@ func TestCheckPVCsReportsPendingAndLostClaims(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "pvcs")
 
-	result := monitor.checkPVCs(ctx)
+	result := monitor.checkPVCs(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	reasons := map[string]bool{}
 	for _, finding := range result.findings {
 		reasons[finding.Reason] = true
@@ -664,7 +664,7 @@ func TestCheckPVCsReportsTrueConditions(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "pvcs")
 
-	result := monitor.checkPVCs(ctx)
+	result := monitor.checkPVCs(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -691,7 +691,7 @@ func TestCheckScalingReportsHPAConditionsAndReplicaPressure(t *testing.T) {
 	monitor := newTestMonitor(client, nil, nil, "ns1")
 	disableAllExcept(monitor, "scaling")
 
-	result := monitor.checkScaling(ctx)
+	result := monitor.checkScaling(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	reasons := map[string]bool{}
 	for _, finding := range result.findings {
 		reasons[finding.Reason] = true
@@ -737,7 +737,8 @@ func TestCheckCustomResourcesReportsGenerationLag(t *testing.T) {
 	monitor := newTestMonitor(client, nil, dyn, "ns1")
 	disableAllExcept(monitor, "custom-resources")
 
-	result := monitor.checkCustomResources(ctx)
+	apiLists, discoveryErr := monitor.customResourceAPILists()
+	result := monitor.checkCustomResources(ctx, apiLists, discoveryErr)
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(result.findings))
 	}
@@ -780,7 +781,8 @@ func TestCheckCustomResourcesReportsFalseCondition(t *testing.T) {
 	monitor := newTestMonitor(client, nil, dyn, "ns1")
 	disableAllExcept(monitor, "custom-resources")
 
-	result := monitor.checkCustomResources(ctx)
+	apiLists, discoveryErr := monitor.customResourceAPILists()
+	result := monitor.checkCustomResources(ctx, apiLists, discoveryErr)
 	if len(result.findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d: %+v", len(result.findings), result.findings)
 	}
@@ -868,7 +870,7 @@ func TestCheckResourceUsageIncrementsSampleMetric(t *testing.T) {
 
 	counter := resourceSamples.WithLabelValues("ns1", "metrics-server")
 	before := counterValue(t, counter)
-	result := monitor.checkResourceUsage(ctx, time.Now().UTC())
+	result := monitor.checkResourceUsage(ctx, monitor.buildSnapshot(ctx, time.Now().UTC()))
 	after := counterValue(t, counter)
 
 	if !result.complete {

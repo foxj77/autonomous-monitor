@@ -39,18 +39,25 @@ var logPatterns = []struct {
 type checkResult struct {
 	findings []Finding
 	complete bool
+	// observations carries observation deltas produced by a check. The main
+	// goroutine merges these into m.state.Observations and sets m.dirty after
+	// runCheck returns successfully. Keeping observation mutation out of the
+	// check goroutine prevents an abandoned (timed-out) check from racing the
+	// main goroutine's reads of m.state.
+	observations map[string]Observation
 }
 
-func (m *Monitor) checkPods(ctx context.Context, now time.Time) checkResult {
-	pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkPods(_ context.Context, snap *snapshot) checkResult {
+	if !snap.podsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "pods", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "pods", "ok").Inc()
 
+	now := snap.now
 	var findings []Finding
-	for _, pod := range pods.Items {
+	observations := map[string]Observation{}
+	for _, pod := range snap.pods {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -93,7 +100,7 @@ func (m *Monitor) checkPods(ctx context.Context, now time.Time) checkResult {
 		}
 
 		obsKey := fmt.Sprintf("pod/%s/restarts", podName)
-		if obs, ok := m.state.Observations[obsKey]; ok && now.Sub(obs.LastSeen) <= m.cfg.RestartWindow {
+		if obs, ok := snap.priorObservations[obsKey]; ok && now.Sub(obs.LastSeen) <= m.cfg.RestartWindow {
 			if delta := totalRestarts - obs.RestartCount; delta >= m.cfg.RestartWarningCount {
 				findings = append(findings, NewFinding(m.cfg.Namespace, "Pod", podName, "restart-rate", "restarts-increased", 65, []string{
 					fmt.Sprintf("restart count increased by %d within %s", delta, m.cfg.RestartWindow),
@@ -101,23 +108,22 @@ func (m *Monitor) checkPods(ctx context.Context, now time.Time) checkResult {
 				}))
 			}
 		}
-		m.state.Observations[obsKey] = &Observation{RestartCount: totalRestarts, LastSeen: now}
+		observations[obsKey] = Observation{RestartCount: totalRestarts, LastSeen: now}
 
 	}
 
-	return checkResult{findings: findings, complete: true}
+	return checkResult{findings: findings, complete: true, observations: observations}
 }
 
-func (m *Monitor) checkResourceSpecs(ctx context.Context) checkResult {
-	pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkResourceSpecs(_ context.Context, snap *snapshot) checkResult {
+	if !snap.podsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "resource-spec", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "resource-spec", "ok").Inc()
 
 	var findings []Finding
-	for _, pod := range pods.Items {
+	for _, pod := range snap.pods {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -148,16 +154,16 @@ func (m *Monitor) checkPodResourceSpecs(pod corev1.Pod) []Finding {
 	return findings
 }
 
-func (m *Monitor) checkEvents(ctx context.Context, now time.Time) checkResult {
-	events, err := m.kube.CoreV1().Events(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkEvents(_ context.Context, snap *snapshot) checkResult {
+	if !snap.eventsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "events", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "events", "ok").Inc()
 
-	findings := make([]Finding, 0, len(events.Items))
-	for _, event := range events.Items {
+	now := snap.now
+	findings := make([]Finding, 0, len(snap.events))
+	for _, event := range snap.events {
 		if event.Type != corev1.EventTypeWarning {
 			continue
 		}
@@ -179,28 +185,26 @@ func (m *Monitor) checkEvents(ctx context.Context, now time.Time) checkResult {
 	return checkResult{findings: findings, complete: true}
 }
 
-func (m *Monitor) checkWorkloads(ctx context.Context) checkResult {
+func (m *Monitor) checkWorkloads(_ context.Context, snap *snapshot) checkResult {
 	var findings []Finding
 	complete := true
 
-	deployments, err := m.kube.AppsV1().Deployments(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+	if !snap.deploymentsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "deployments", "error").Inc()
 		complete = false
 	} else {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "deployments", "ok").Inc()
-		for _, deployment := range deployments.Items {
+		for _, deployment := range snap.deployments {
 			findings = append(findings, deploymentFindings(m.cfg.Namespace, deployment)...)
 		}
 	}
 
-	statefulSets, err := m.kube.AppsV1().StatefulSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+	if !snap.statefulSetsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "statefulsets", "error").Inc()
 		complete = false
 	} else {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "statefulsets", "ok").Inc()
-		for _, sts := range statefulSets.Items {
+		for _, sts := range snap.statefulSets {
 			desired := int32(1)
 			if sts.Spec.Replicas != nil {
 				desired = *sts.Spec.Replicas
@@ -213,13 +217,12 @@ func (m *Monitor) checkWorkloads(ctx context.Context) checkResult {
 		}
 	}
 
-	daemonSets, err := m.kube.AppsV1().DaemonSets(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+	if !snap.daemonSetsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "daemonsets", "error").Inc()
 		complete = false
 	} else {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "daemonsets", "ok").Inc()
-		for _, ds := range daemonSets.Items {
+		for _, ds := range snap.daemonSets {
 			if ds.Status.DesiredNumberScheduled > ds.Status.NumberReady {
 				findings = append(findings, NewFinding(m.cfg.Namespace, "DaemonSet", ds.Name, "workload", "ready-pods-below-desired", 65, []string{
 					fmt.Sprintf("desired scheduled=%d ready=%d", ds.Status.DesiredNumberScheduled, ds.Status.NumberReady),
@@ -250,16 +253,18 @@ func deploymentFindings(namespace string, deployment appsv1.Deployment) []Findin
 	return findings
 }
 
-func (m *Monitor) checkServices(ctx context.Context) checkResult {
-	services, err := m.kube.CoreV1().Services(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkServices(_ context.Context, snap *snapshot) checkResult {
+	// Services requires both the service list and the pod list (selectors are
+	// matched against snapshot.pods in memory). If either failed, today's
+	// behavior was to return incomplete.
+	if !snap.servicesOK || !snap.podsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "services", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "services", "ok").Inc()
 
 	var findings []Finding
-	for _, svc := range services.Items {
+	for _, svc := range snap.services {
 		if svc.DeletionTimestamp != nil || svc.Spec.Type == corev1.ServiceTypeExternalName {
 			continue
 		}
@@ -273,41 +278,38 @@ func (m *Monitor) checkServices(ctx context.Context) checkResult {
 		if len(svc.Spec.Selector) == 0 {
 			continue
 		}
-		selector := labels.SelectorFromSet(svc.Spec.Selector).String()
-		pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
-		if err != nil {
-			checksTotal.WithLabelValues(m.cfg.Namespace, "services", "error").Inc()
-			return checkResult{findings: findings, complete: false}
-		}
-		if countLivePods(pods.Items) == 0 {
+		selector := labels.SelectorFromSet(svc.Spec.Selector)
+		if countLiveMatchingPods(snap.pods, selector) == 0 {
 			findings = append(findings, NewFinding(m.cfg.Namespace, "Service", svc.Name, "service", "selector-matches-no-pods", 60, []string{
-				fmt.Sprintf("service selector %q matches no live pods", selector),
+				fmt.Sprintf("service selector %q matches no live pods", selector.String()),
 			}))
 		}
 	}
 	return checkResult{findings: findings, complete: true}
 }
 
-func countLivePods(pods []corev1.Pod) int {
+func countLiveMatchingPods(pods []corev1.Pod, selector labels.Selector) int {
 	count := 0
 	for _, pod := range pods {
-		if pod.DeletionTimestamp == nil {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if selector.Matches(labels.Set(pod.Labels)) {
 			count++
 		}
 	}
 	return count
 }
 
-func (m *Monitor) checkPVCs(ctx context.Context) checkResult {
-	pvcs, err := m.kube.CoreV1().PersistentVolumeClaims(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkPVCs(_ context.Context, snap *snapshot) checkResult {
+	if !snap.pvcsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "pvcs", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "pvcs", "ok").Inc()
 
 	var findings []Finding
-	for _, pvc := range pvcs.Items {
+	for _, pvc := range snap.pvcs {
 		if pvc.DeletionTimestamp != nil {
 			continue
 		}
@@ -337,16 +339,15 @@ func (m *Monitor) checkPVCs(ctx context.Context) checkResult {
 	return checkResult{findings: findings, complete: true}
 }
 
-func (m *Monitor) checkScaling(ctx context.Context) checkResult {
-	hpas, err := m.kube.AutoscalingV2().HorizontalPodAutoscalers(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkScaling(_ context.Context, snap *snapshot) checkResult {
+	if !snap.hpasOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "scaling", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "scaling", "ok").Inc()
 
 	var findings []Finding
-	for _, hpa := range hpas.Items {
+	for _, hpa := range snap.hpas {
 		if hpa.DeletionTimestamp != nil {
 			continue
 		}
@@ -440,16 +441,15 @@ func scoreEventReason(reason string) int {
 	}
 }
 
-func (m *Monitor) checkLogs(ctx context.Context) checkResult {
-	pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+func (m *Monitor) checkLogs(ctx context.Context, snap *snapshot) checkResult {
+	if !snap.podsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "logs", "error").Inc()
 		return checkResult{complete: false}
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "logs", "ok").Inc()
 
 	var findings []Finding
-	for _, pod := range pods.Items {
+	for _, pod := range snap.pods {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -529,7 +529,7 @@ func (m *Monitor) scanContainerLogs(ctx context.Context, podName, containerName 
 	return findings
 }
 
-func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkResult {
+func (m *Monitor) checkResourceUsage(ctx context.Context, snap *snapshot) checkResult {
 	if m.metrics == nil {
 		return checkResult{complete: true}
 	}
@@ -541,15 +541,16 @@ func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkRe
 	}
 	checksTotal.WithLabelValues(m.cfg.Namespace, "resource-usage", "ok").Inc()
 
-	pods, err := m.kube.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+	if !snap.podsOK {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "resource-usage", "error").Inc()
 		return checkResult{complete: false}
 	}
 
+	now := snap.now
+
 	// Build pod→total-memory-limit map from pod specs.
 	memLimit := map[string]int64{}
-	for _, pod := range pods.Items {
+	for _, pod := range snap.pods {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -565,6 +566,7 @@ func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkRe
 	}
 
 	var findings []Finding
+	observations := map[string]Observation{}
 	for i := range podMetricsList.Items {
 		pm := &podMetricsList.Items[i]
 		limit, ok := memLimit[pm.Name]
@@ -582,13 +584,13 @@ func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkRe
 		pct := usedBytes * 100 / limit
 
 		obsKey := fmt.Sprintf("pod/%s/memory", pm.Name)
-		if _, exists := m.state.Observations[obsKey]; !exists {
-			m.state.Observations[obsKey] = &Observation{LastSeen: now}
+		obs := Observation{LastSeen: now}
+		if prior, exists := snap.priorObservations[obsKey]; exists {
+			obs = prior
 		}
-		obs := m.state.Observations[obsKey]
 		obs.MemorySamplesPct = appendMemSample(obs.MemorySamplesPct, pct, 5)
 		obs.LastResourceSample = now
-		m.dirty = true
+		observations[obsKey] = obs
 		resourceSamples.WithLabelValues(m.cfg.Namespace, m.cfg.ResourceUsageBackend).Inc()
 
 		trending, trendNote := memoryTrending(obs.MemorySamplesPct)
@@ -628,7 +630,7 @@ func (m *Monitor) checkResourceUsage(ctx context.Context, now time.Time) checkRe
 		}
 	}
 
-	return checkResult{findings: findings, complete: true}
+	return checkResult{findings: findings, complete: true, observations: observations}
 }
 
 func appendMemSample(samples []int64, val int64, maxLen int) []int64 {
@@ -663,16 +665,19 @@ func fmtMiB(bytes int64) string {
 var negativeConditions = map[string]bool{"Stalled": true, "Reconciling": true, "Failed": true}
 var positiveConditions = map[string]bool{"Ready": true, "Available": true, "Healthy": true, "Synced": true}
 
-func (m *Monitor) checkCustomResources(ctx context.Context) checkResult {
+// checkCustomResources scans namespaced custom resources for generation lag and
+// unhealthy conditions. Discovery is refreshed on the main goroutine (see
+// Poll) and passed in via apiLists/discoveryErr so this check — which may run in
+// an abandoned goroutine after a timeout — never mutates the discovery cache.
+func (m *Monitor) checkCustomResources(ctx context.Context, apiLists []*metav1.APIResourceList, discoveryErr error) checkResult {
 	if m.dynamic == nil {
 		return checkResult{complete: true}
 	}
 
-	apiLists, err := m.customResourceAPILists()
-	if err != nil {
+	if discoveryErr != nil {
 		checksTotal.WithLabelValues(m.cfg.Namespace, "custom-resources", "error").Inc()
 		customResourceScans.WithLabelValues(m.cfg.Namespace, "error").Inc()
-		log.Printf("ERROR: custom resource discovery failed: %v", err)
+		log.Printf("ERROR: custom resource discovery failed: %v", discoveryErr)
 		return checkResult{complete: false}
 	}
 
