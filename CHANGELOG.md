@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/foxj77/autonomous-monitor/compare/v0.3.0...v0.3.1) (2026-06-07)
+
+
+### Performance
+
+* Tier-1 resource optimizations + improvements tracker ([6730ce6](https://github.com/foxj77/autonomous-monitor/commit/6730ce69a671b15cbe2674cdc45239ba4f555674))
+* Tier-1 resource optimizations + improvements tracker ([366ddce](https://github.com/foxj77/autonomous-monitor/commit/366ddce02c23b36be8693665e641dc36f4eef468))
+
 ## [0.3.0](https://github.com/foxj77/autonomous-monitor/compare/v0.2.1...v0.3.0) (2026-06-07)
 
 
