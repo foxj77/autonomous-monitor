@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -220,13 +221,22 @@ func listEnv(keys ...string) []string {
 	return nil
 }
 
+// clampInt32 clamps v to [lo, hi] and returns it as an int32. The explicit
+// math.MaxInt32/MinInt32 guards keep the conversion provably safe regardless of
+// the bounds a caller passes (v originates from strconv.Atoi, which is 64-bit on
+// 64-bit platforms), so it never depends on caller discipline to avoid overflow.
 func clampInt32(v, lo, hi int) int32 {
-	switch {
-	case v < lo:
-		return int32(lo) //nolint:gosec // bounded by caller-provided lo
-	case v > hi:
-		return int32(hi) //nolint:gosec // bounded by caller-provided hi
-	default:
-		return int32(v) //nolint:gosec // bounded by lo..hi range, fits in int32
+	if v < lo {
+		v = lo
 	}
+	if v > hi {
+		v = hi
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
 }

@@ -1,11 +1,36 @@
 package main
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestClampInt32(t *testing.T) {
+	// huge exceeds math.MaxInt32; built via int64 so it also compiles on 32-bit.
+	huge := int(int64(math.MaxInt32) + 100)
+	cases := []struct {
+		name      string
+		v, lo, hi int
+		want      int32
+	}{
+		{"below lo", 0, 1, 1000, 1},
+		{"above hi", 5000, 1, 1000, 1000},
+		{"within range", 42, 1, 1000, 42},
+		{"at lo", 1, 1, 1000, 1},
+		{"at hi", 1000, 1, 1000, 1000},
+		{"overflow guard caps at MaxInt32", huge, 0, math.MaxInt64, math.MaxInt32},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampInt32(tc.v, tc.lo, tc.hi); got != tc.want {
+				t.Fatalf("clampInt32(%d, %d, %d) = %d, want %d", tc.v, tc.lo, tc.hi, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestBoolEnvDefaultOn(t *testing.T) {
 	t.Setenv("CHECK_TEST_ENABLED", "")
