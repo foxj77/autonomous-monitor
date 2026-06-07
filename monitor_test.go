@@ -575,6 +575,103 @@ func TestMonitorRefusesOversizedStateAfterPruning(t *testing.T) {
 	}
 }
 
+// TestPollSkipsListsForDisabledChecks asserts the snapshot only lists resources
+// that an enabled check consumes: with just the scaling check on, a poll lists
+// HPAs but never pods, events, or deployments.
+func TestPollSkipsListsForDisabledChecks(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	var podLists, eventLists, deployLists, hpaLists int32
+	count := func(c *int32) k8stesting.ReactionFunc {
+		return func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			atomic.AddInt32(c, 1)
+			return false, nil, nil // fall through to the default tracker
+		}
+	}
+	client.PrependReactor("list", "pods", count(&podLists))
+	client.PrependReactor("list", "events", count(&eventLists))
+	client.PrependReactor("list", "deployments", count(&deployLists))
+	client.PrependReactor("list", "horizontalpodautoscalers", count(&hpaLists))
+
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	cfg := testConfig("ns1")
+	cfg.Checks = CheckConfig{Scaling: true}
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state, nil)
+
+	monitor.Poll(ctx)
+
+	if got := atomic.LoadInt32(&hpaLists); got < 1 {
+		t.Fatalf("hpa List count = %d, want >= 1 (scaling check enabled)", got)
+	}
+	for name, got := range map[string]int32{
+		"pods":        atomic.LoadInt32(&podLists),
+		"events":      atomic.LoadInt32(&eventLists),
+		"deployments": atomic.LoadInt32(&deployLists),
+	} {
+		if got != 0 {
+			t.Errorf("%s List count = %d, want 0 (check disabled)", name, got)
+		}
+	}
+}
+
+// TestEventsListUsesWarningFieldSelector asserts events are filtered to
+// type=Warning at the API server rather than fetched in full and filtered in
+// memory.
+func TestEventsListUsesWarningFieldSelector(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	var fieldSelector string
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		fieldSelector = action.(k8stesting.ListAction).GetListRestrictions().Fields.String()
+		return false, nil, nil
+	})
+
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	cfg := testConfig("ns1")
+	cfg.Checks = CheckConfig{Events: true}
+	monitor := NewMonitor(cfg, client, nil, nil, &recordingPublisher{}, store, state, nil)
+
+	monitor.Poll(ctx)
+
+	if fieldSelector != "type=Warning" {
+		t.Fatalf("events list field selector = %q, want %q", fieldSelector, "type=Warning")
+	}
+}
+
+// TestStateSavedAsCompactJSON asserts the state ConfigMap is written as compact
+// JSON (no indentation), so the written payload matches the size measured by the
+// MAX_STATE_BYTES guard and wastes no etcd bytes on whitespace.
+func TestStateSavedAsCompactJSON(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	store := NewStateStore(client, "ns1", "autonomous-monitor-state")
+	state, err := store.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load state: %v", err)
+	}
+	state.Findings["f1"] = &FindingState{Kind: "Pod", Name: "p1", Check: "pod-health", Reason: "not-ready", Status: "ongoing"}
+	if err := store.Save(ctx, state); err != nil {
+		t.Fatalf("Save state: %v", err)
+	}
+
+	cm, err := client.CoreV1().ConfigMaps("ns1").Get(ctx, "autonomous-monitor-state", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get ConfigMap: %v", err)
+	}
+	raw := cm.Data[stateDataKey]
+	if strings.Contains(raw, "\n") {
+		t.Fatalf("state JSON is indented (contains newlines); want compact:\n%s", raw)
+	}
+}
+
 func testConfig(namespace string) Config {
 	return Config{
 		Namespace:                namespace,

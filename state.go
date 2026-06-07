@@ -112,7 +112,12 @@ func (s *StateStore) Save(ctx context.Context, state *MonitorState) error {
 	if !s.writeable {
 		return fmt.Errorf("state ConfigMap %s/%s is not writeable", s.namespace, s.name)
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+	// Compact JSON: the state ConfigMap is machine-read only. Indenting wasted
+	// ~20-30% on whitespace (more etcd bytes, closer to the 1 MiB object limit)
+	// and CPU. It also kept the written payload larger than the compact size
+	// measured by currentStateBytes/maybeSave, so the MAX_STATE_BYTES guard now
+	// matches what is actually written.
+	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
@@ -148,7 +153,8 @@ func (s *StateStore) Save(ctx context.Context, state *MonitorState) error {
 }
 
 func (s *StateStore) create(ctx context.Context, state *MonitorState) (*corev1.ConfigMap, error) {
-	data, err := json.MarshalIndent(state, "", "  ")
+	// Compact JSON to match Save (machine-read only; saves etcd bytes and CPU).
+	data, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
 	}

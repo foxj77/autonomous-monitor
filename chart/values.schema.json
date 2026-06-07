@@ -160,6 +160,12 @@
         "maxPollGap": { "type": "string" }
       }
     },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "goMemLimit": { "type": "string" }
+      }
+    },
     "suppression": {
       "type": "object",
       "properties": {

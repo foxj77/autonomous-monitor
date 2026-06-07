@@ -60,6 +60,11 @@ spec:
               value: "100"
             - name: RESOURCE_USAGE_BACKEND
               value: metrics-server
+            # Soft Go heap ceiling (~90% of limits.memory). The Go runtime does
+            # not read the cgroup memory limit, so this keeps the GC reclaiming
+            # before the kernel OOM-kills the pod. Update alongside limits.memory.
+            - name: GOMEMLIMIT
+              value: "115MiB"
           resources:
             requests:
               cpu: 10m
