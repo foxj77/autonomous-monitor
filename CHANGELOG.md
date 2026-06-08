@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/foxj77/autonomous-monitor/compare/v0.3.1...v0.3.2) (2026-06-07)
+
+
+### Bug Fixes
+
+* bound int32 conversion in clampInt32 (CodeQL go/incorrect-integer-conversion) ([4e58f32](https://github.com/foxj77/autonomous-monitor/commit/4e58f32be1d33a9e08a54cf702eb26550bcf30c4))
+* bound int32 conversion in clampInt32 (CodeQL high-severity) ([7c785b5](https://github.com/foxj77/autonomous-monitor/commit/7c785b574c36f7100ae321ec0f880782dfead311))
+
 ## [0.3.1](https://github.com/foxj77/autonomous-monitor/compare/v0.3.0...v0.3.1) (2026-06-07)
 
 
