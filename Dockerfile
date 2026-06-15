@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /autonomous-monitor .
 
-FROM alpine:3.23
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
 	&& addgroup -g 65532 -S autonomous-monitor \
 	&& adduser -u 65532 -S -D -H -G autonomous-monitor autonomous-monitor
